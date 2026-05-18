@@ -99,7 +99,7 @@
       </div>
       <div class="form-error" id="step2-error"></div>
       <button class="btn btn-primary" id="step2-btn" onclick="step2Next()">Verify &amp; Continue</button>
-      <button class="btn btn-ghost" style="margin-top:.5rem" onclick="goToStep(1)">Back</button>
+      <button class="btn btn-ghost btn-back" onclick="goToStep(1)">Back</button>
     </div>
     <div class="step" id="step-3">
       <div class="verify-badge">
@@ -110,7 +110,7 @@
       <div class="step-sub">Your account has been created. Sign in to start using your storage.</div>
       <button class="btn btn-primary" onclick="showScreen('login')">Go to Sign In</button>
     </div>
-    <div class="form-note" id="signup-footer-note" style="margin-top:1rem">
+    <div class="form-note" id="signup-footer-note">
       Already have an account? <a href="#" onclick="showScreen('login');return false;">Sign in</a>
     </div>
   </div>

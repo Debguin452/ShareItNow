@@ -34,9 +34,9 @@ function precacheSlices(file) {
     const d = await r.json();
     if (!d.ready) {
       document.getElementById('login-screen').innerHTML =
-        '<div class="auth-card" style="text-align:center;padding:2.5rem 2rem">' +
-        '<h2 style="margin-bottom:.75rem;font-size:1rem">Service Not Configured</h2>' +
-        '<p style="font-size:.83rem;color:#666;line-height:1.6">The operator has not set the required environment variables.<br>Refer to the README for setup instructions.</p>' +
+        '<div class="auth-card svc-unconfigured">' +
+        '<h2>Service Not Configured</h2>' +
+        '<p>The operator has not set the required environment variables.<br>Refer to the README for setup instructions.</p>' +
         '</div>';
       showScreen('login'); return;
     }
@@ -554,4 +554,3 @@ async function loadFilePreview(f) {
 
   noPreview('No preview available.<br>Download to open this file.');
 }
-</script>

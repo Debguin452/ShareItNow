@@ -204,6 +204,14 @@ body {
 .fd-actions { display: flex; gap: .6rem; padding: .9rem 1.1rem 1.4rem; flex-shrink: 0; border-top: 1px solid #f0f0f2; }
 .fd-actions .btn { margin: 0; flex: 1; }
 
+/* Service-not-configured notice (replaces inline styles in app.js) */
+.svc-unconfigured { text-align: center; padding: 2.5rem 2rem; }
+.svc-unconfigured h2 { margin-bottom: .75rem; font-size: 1rem; }
+.svc-unconfigured p  { font-size: .83rem; color: #666; line-height: 1.6; }
+
+/* Back button in signup flow */
+.btn-back { margin-top: .5rem; }
+
 /* Logo: black on light, white on dark */
 .brand-logo img,
 .app-brand-logo img { filter: brightness(0); }
