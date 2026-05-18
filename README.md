@@ -1,6 +1,6 @@
 # StoreGit
 
-A serverless file storage service built on **Cloudflare Pages Functions** and the **GitHub Contents / Git Data APIs**. Each registered user is backed by their own GitHub repository. The operator deploys a single Cloudflare Pages project; users bring their own GitHub repository and personal access token.
+A serverless file(or codes) storage service built on **Cloudflare Pages Functions** and the **GitHub Contents / Git Data APIs**. Each registered user is backed by their own GitHub repository. The operator deploys a single Cloudflare Pages project; users bring their own GitHub repository and personal access token.
 
 ---
 
@@ -24,15 +24,15 @@ A serverless file storage service built on **Cloudflare Pages Functions** and th
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                  Cloudflare Pages (Operator)                 │
-│                                                              │
-│   User A  ──►  GitHub Repo A  (user file storage)           │
-│   User B  ──►  GitHub Repo B  (user file storage)           │
-│   User C  ──►  GitHub Repo C  (user file storage)           │
-│                                                              │
-│   Registry Repo  ──►  Stores all user account records       │
-└─────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────┐
+│                  Cloudflare Pages (Operator)                │
+│                                                             │
+│   User A  ──►  GitHub Repo A  (user file storage)          │
+│   User B  ──►  GitHub Repo B  (user file storage)          │
+│   User C  ──►  GitHub Repo C  (user file storage)          │
+│                                                             │
+│   Registry Repo  ──►  Stores all user account records      │
+└───────────────────────────────────────────────────┘
 ```
 
 The operator maintains one **registry repository** on GitHub that stores all user account records as JSON files. Each user owns and controls their own separate **storage repository**; the operator never has direct write access to user data beyond what the user's encrypted token permits.
@@ -458,7 +458,7 @@ After registration, users authenticate using only their username and password. T
 
 ## Credits
 
-Created by **Deb Guin** · [storegit.pages.dev](https://storegit.pages.dev)
+Conceived by **Deb Guin** • [storegit.pages.dev](https://storegit.pages.dev)
 
 ---
 
