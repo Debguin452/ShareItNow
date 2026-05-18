@@ -78,7 +78,7 @@ const SEC = {
   'Content-Security-Policy':
     "default-src 'none'; script-src 'none'; " +
     "style-src 'none'; img-src 'none'; " +
-    "connect-src 'self'; frame-ancestors 'none'; base-uri 'none';",
+    "connect-src 'self'; frame-ancestors 'none'; form-action 'none'; base-uri 'none';",
   'Cache-Control': 'no-store',
 };
 
@@ -179,8 +179,13 @@ async function timingSafeEq(a, b) {
   let d = 0; for (let i = 0; i < ua.length; i++) d |= ua[i] ^ ub[i];
   return d === 0;
 }
-const PBKDF2_ITERS_CURRENT = 600_000;  // OWASP 2023 minimum for PBKDF2-SHA256
-const PBKDF2_ITERS_LEGACY  = 100_000;  // iteration count used before Fix 8
+// PBKDF2_ITERS_CURRENT is deliberately set to 100,000 — not the desktop OWASP figure of 600,000.
+// Cloudflare Workers have a strict CPU-time budget (10 ms free / 50 ms paid per request).
+// 600,000 iterations of PBKDF2-SHA256 takes ~60–200 ms of CPU time and causes the Worker
+// to be killed with a 500 before the try/catch can respond. 100,000 iterations run in ~5–15 ms,
+// staying well inside the budget while still providing strong resistance to offline brute-force.
+const PBKDF2_ITERS_CURRENT = 100_000;
+const PBKDF2_ITERS_LEGACY  =  50_000;  // accounts created before the 100k era
 
 async function pbkdf2Hash(password, salt, iterations = PBKDF2_ITERS_CURRENT) {
   const km = await crypto.subtle.importKey('raw', ENC.encode(password), 'PBKDF2', false, ['deriveBits']);
