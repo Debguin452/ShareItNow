@@ -53,25 +53,31 @@ function showScreen(name) {
   if (name === 'app') document.getElementById('app-screen').classList.add('active');
   else { const el = document.getElementById(`${name}-screen`); if (el) el.classList.add('active'); }
 }
-document.getElementById('login-username').addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('login-password').focus(); });
-document.getElementById('login-password').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
+// ── Null-safe event binder — prevents crash if index.html and app.js versions are mismatched ──
+function on(id, evt, fn) {
+  const el = document.getElementById(id);
+  if (!el) { console.warn('[StoreGit] missing element #' + id); return; }
+  el.addEventListener(evt, fn);
+}
+on('login-username',    'keydown', e => { if (e.key === 'Enter') document.getElementById('login-password')?.focus(); });
+on('login-password',    'keydown', e => { if (e.key === 'Enter') doLogin(); });
 
 // ── Wire all UI handlers (replaces inline onclick/oninput/onchange blocked by CSP) ──
-document.getElementById('login-btn')       .addEventListener('click',  () => doLogin());
-document.getElementById('goto-signup')     .addEventListener('click',  e  => { e.preventDefault(); showScreen('signup'); });
-document.getElementById('s-password')      .addEventListener('input',  e  => updateStrength(e.target.value));
-document.getElementById('step1-btn')       .addEventListener('click',  () => step1Next());
-document.getElementById('step2-btn')       .addEventListener('click',  () => step2Next());
-document.getElementById('step2-back-btn')  .addEventListener('click',  () => goToStep(1));
-document.getElementById('step3-signin-btn').addEventListener('click',  () => showScreen('login'));
-document.getElementById('goto-login')      .addEventListener('click',  e  => { e.preventDefault(); showScreen('login'); });
-document.getElementById('signout-btn')     .addEventListener('click',  () => doLogout());
-document.getElementById('file-input')      .addEventListener('change', e  => onFilePicked(e.target.files));
-document.getElementById('upload-btn')      .addEventListener('click',  () => startUpload());
-document.getElementById('clear-queue-btn') .addEventListener('click',  () => clearQueue());
-document.getElementById('refresh-files-btn').addEventListener('click', () => loadFiles());
-document.getElementById('fd-overlay')      .addEventListener('click',  e  => { if (e.target === e.currentTarget) closeFileDetail(); });
-document.getElementById('fd-close-btn')    .addEventListener('click',  () => closeFileDetail());
+on('login-btn',          'click',  () => doLogin());
+on('goto-signup',        'click',  e  => { e.preventDefault(); showScreen('signup'); });
+on('s-password',         'input',  e  => updateStrength(e.target.value));
+on('step1-btn',          'click',  () => step1Next());
+on('step2-btn',          'click',  () => step2Next());
+on('step2-back-btn',     'click',  () => goToStep(1));
+on('step3-signin-btn',   'click',  () => showScreen('login'));
+on('goto-login',         'click',  e  => { e.preventDefault(); showScreen('login'); });
+on('signout-btn',        'click',  () => doLogout());
+on('file-input',         'change', e  => onFilePicked(e.target.files));
+on('upload-btn',         'click',  () => startUpload());
+on('clear-queue-btn',    'click',  () => clearQueue());
+on('refresh-files-btn',  'click',  () => loadFiles());
+on('fd-overlay',         'click',  e  => { if (e.target === e.currentTarget) closeFileDetail(); });
+on('fd-close-btn',       'click',  () => closeFileDetail());
 async function doLogin() {
   if (loginLocked) return;
   const username = document.getElementById('login-username').value.trim();
@@ -91,13 +97,16 @@ async function doLogin() {
     if (r.ok) {
       const d = await r.json();
       bootApp({ display: d.display || username, username });
+      return; // success — app screen takes over, leave button as-is
     } else if (r.status === 429) {
       startLockout(15 * 60);
+      return; // startLockout owns the button state from here
     } else {
       errEl.textContent = 'Incorrect username or password.';
       document.getElementById('login-password').focus();
     }
   } catch { errEl.textContent = 'Connection error. Please try again.'; }
+  // Only reached on wrong password or network error — restore the button
   btn.disabled = false; btn.textContent = 'Sign In';
 }
 function startLockout(secs) {
