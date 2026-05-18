@@ -31,8 +31,8 @@
     </div>
     <div class="form-error"  id="login-error"></div>
     <div class="lockout-msg" id="login-lockout"></div>
-    <button class="btn btn-primary" id="login-btn" onclick="doLogin()">Sign In</button>
-    <div class="form-note">No account yet? <a href="#" onclick="showScreen('signup');return false;">Create one</a></div>
+    <button class="btn btn-primary" id="login-btn">Sign In</button>
+    <div class="form-note">No account yet? <a href="#" id="goto-signup">Create one</a></div>
   </div>
 </div>
 <div id="signup-screen" class="screen">
@@ -61,7 +61,7 @@
       <div class="field">
         <label for="s-password">Password</label>
         <input id="s-password" type="password" placeholder="Minimum 8 characters"
-               autocomplete="new-password" oninput="updateStrength(this.value)">
+               autocomplete="new-password" id="s-password">
         <div class="pw-strength" id="pw-strength">
           <div class="pw-strength-bar"><div class="pw-strength-fill" id="pw-strength-fill"></div></div>
           <div class="pw-strength-label" id="pw-strength-label"></div>
@@ -72,7 +72,7 @@
         <input id="s-password2" type="password" placeholder="Repeat password" autocomplete="new-password">
       </div>
       <div class="form-error" id="step1-error"></div>
-      <button class="btn btn-primary" onclick="step1Next()">Continue</button>
+      <button class="btn btn-primary" id="step1-btn">Continue</button>
     </div>
     <div class="step" id="step-2">
       <div class="step-title">Connect your GitHub repository</div>
@@ -98,8 +98,8 @@
         <input id="s-gh-repo" placeholder="my-storage" autocomplete="off" autocorrect="off" spellcheck="false">
       </div>
       <div class="form-error" id="step2-error"></div>
-      <button class="btn btn-primary" id="step2-btn" onclick="step2Next()">Verify &amp; Continue</button>
-      <button class="btn btn-ghost btn-back" onclick="goToStep(1)">Back</button>
+      <button class="btn btn-primary" id="step2-btn">Verify &amp; Continue</button>
+      <button class="btn btn-ghost btn-back" id="step2-back-btn">Back</button>
     </div>
     <div class="step" id="step-3">
       <div class="verify-badge">
@@ -108,10 +108,10 @@
       </div>
       <div class="step-title">You are all set</div>
       <div class="step-sub">Your account has been created. Sign in to start using your storage.</div>
-      <button class="btn btn-primary" onclick="showScreen('login')">Go to Sign In</button>
+      <button class="btn btn-primary" id="step3-signin-btn">Go to Sign In</button>
     </div>
     <div class="form-note" id="signup-footer-note">
-      Already have an account? <a href="#" onclick="showScreen('login');return false;">Sign in</a>
+      Already have an account? <a href="#" id="goto-login">Sign in</a>
     </div>
   </div>
 </div>
@@ -128,7 +128,7 @@
     </div>
     <div class="topbar-right">
       <div class="user-chip" id="user-chip" title=""></div>
-      <button class="btn-signout" onclick="doLogout()" title="Sign out" aria-label="Sign out">
+      <button class="btn-signout" id="signout-btn" title="Sign out" aria-label="Sign out">
         <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
       </button>
     </div>
@@ -139,7 +139,7 @@
         <div class="card-title">Upload</div>
       </div>
       <div class="drop-zone" id="drop-zone">
-        <input type="file" id="file-input" multiple onchange="onFilePicked(this.files)">
+        <input type="file" id="file-input" multiple>
         <div class="drop-zone-icon">
           <svg viewBox="0 0 36 36" fill="none">
             <path d="M18 24V12M12 18l6-6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -150,14 +150,14 @@
       </div>
       <div class="upload-queue" id="upload-queue"></div>
       <div class="upload-actions" id="upload-actions">
-        <button class="btn btn-primary btn-sm" id="upload-btn" onclick="startUpload()">Upload Files</button>
-        <button class="btn btn-ghost btn-sm" onclick="clearQueue()">Clear</button>
+        <button class="btn btn-primary btn-sm" id="upload-btn">Upload Files</button>
+        <button class="btn btn-ghost btn-sm" id="clear-queue-btn">Clear</button>
       </div>
     </div>
     <div class="card">
       <div class="card-header">
         <div class="card-title">Files</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadFiles()">Refresh</button>
+        <button class="btn btn-ghost btn-sm" id="refresh-files-btn">Refresh</button>
       </div>
       <div id="file-list"></div>
     </div>
@@ -171,7 +171,7 @@
 </div>
 
 <!-- File detail sheet -->
-<div class="fd-overlay" id="fd-overlay" onclick="if(event.target===this)closeFileDetail()">
+<div class="fd-overlay" id="fd-overlay">
   <div class="fd-sheet" id="fd-sheet">
     <div class="fd-handle"></div>
     <div class="fd-header">
@@ -180,7 +180,7 @@
         <div class="fd-header-name" id="fd-name"></div>
         <div class="fd-header-meta" id="fd-meta"></div>
       </div>
-      <button class="fd-close" onclick="closeFileDetail()" aria-label="Close">
+      <button class="fd-close" id="fd-close-btn" aria-label="Close">
         <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>

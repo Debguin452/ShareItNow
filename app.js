@@ -55,6 +55,23 @@ function showScreen(name) {
 }
 document.getElementById('login-username').addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('login-password').focus(); });
 document.getElementById('login-password').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
+
+// ── Wire all UI handlers (replaces inline onclick/oninput/onchange blocked by CSP) ──
+document.getElementById('login-btn')       .addEventListener('click',  () => doLogin());
+document.getElementById('goto-signup')     .addEventListener('click',  e  => { e.preventDefault(); showScreen('signup'); });
+document.getElementById('s-password')      .addEventListener('input',  e  => updateStrength(e.target.value));
+document.getElementById('step1-btn')       .addEventListener('click',  () => step1Next());
+document.getElementById('step2-btn')       .addEventListener('click',  () => step2Next());
+document.getElementById('step2-back-btn')  .addEventListener('click',  () => goToStep(1));
+document.getElementById('step3-signin-btn').addEventListener('click',  () => showScreen('login'));
+document.getElementById('goto-login')      .addEventListener('click',  e  => { e.preventDefault(); showScreen('login'); });
+document.getElementById('signout-btn')     .addEventListener('click',  () => doLogout());
+document.getElementById('file-input')      .addEventListener('change', e  => onFilePicked(e.target.files));
+document.getElementById('upload-btn')      .addEventListener('click',  () => startUpload());
+document.getElementById('clear-queue-btn') .addEventListener('click',  () => clearQueue());
+document.getElementById('refresh-files-btn').addEventListener('click', () => loadFiles());
+document.getElementById('fd-overlay')      .addEventListener('click',  e  => { if (e.target === e.currentTarget) closeFileDetail(); });
+document.getElementById('fd-close-btn')    .addEventListener('click',  () => closeFileDetail());
 async function doLogin() {
   if (loginLocked) return;
   const username = document.getElementById('login-username').value.trim();
