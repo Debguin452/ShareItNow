@@ -559,6 +559,20 @@ const safeMime = name => MIMES[name.split('.').pop()?.toLowerCase()||''] || 'app
 // MAIN HANDLER
 // ══════════════════════════════════════════════════════════
 export async function onRequest({ request, env, params }) {
+  try {
+    return await _handleRequest({ request, env, params });
+  } catch (err) {
+    // Unhandled error — return a structured JSON 500 instead of a silent Cloudflare HTML error
+    const msg = (err instanceof Error) ? err.message : String(err);
+    console.error('[StoreGit] Unhandled error:', msg, err?.stack || '');
+    return new Response(
+      JSON.stringify({ error: 'An unexpected server error occurred.', detail: msg }),
+      { status: 500, headers: { ...SEC, 'Content-Type': 'application/json' } }
+    );
+  }
+}
+
+async function _handleRequest({ request, env, params }) {
   const method = request.method.toUpperCase();
   const route  = (params.path || []).join('/');
 
