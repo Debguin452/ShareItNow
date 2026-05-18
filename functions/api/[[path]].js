@@ -6,7 +6,9 @@
 //   REGISTRY_GITHUB_OWNER   — owner of the registry repo
 //   REGISTRY_GITHUB_REPO    — name of the registry repo
 //
-// Optional: bind a KV namespace named RATE_LIMIT_KV for persistent rate limiting.
+// IMPORTANT: Bind a KV namespace named RATE_LIMIT_KV for persistent rate limiting.
+// Without it the fallback _memRate Map resets on every Worker cold-start, making
+// brute-force protection ineffective. KV binding is STRONGLY RECOMMENDED in production.
 //
 // Chunked file architecture:
 //   Chunks  →  uploads/.chunks/{filename}/{filename}.part{n}
@@ -21,8 +23,9 @@
 // ── Constants ─────────────────────────────────────────────
 const SESSION_TTL      = 8  * 60 * 60 * 1000;
 const RATE_WINDOW_MS   = 15 * 60 * 1000;
-const RATE_MAX_LOGIN   = 5;
-const RATE_MAX_SIGNUP  = 3;
+const RATE_MAX_LOGIN        = 5;   // per IP
+const RATE_MAX_LOGIN_USER   = 10;  // per username — higher to allow for multi-device use
+const RATE_MAX_SIGNUP       = 3;
 const CHUNK_B64_MAX    = 14 * 1024 * 1024;   // max base64 string length per chunk (10 MB raw ≈ 13.4 MB b64)
 const SMALL_MAX_BYTES  =  5 * 1024 * 1024;   // ≤ 5 MB → Contents API; above → Blobs API
 const MAX_TOTAL_CHUNKS = 512;                  // 512 × 10 MB = ~5 GB maximum
@@ -30,6 +33,10 @@ const SHA_RE           = /^[0-9a-f]{40}$/i;
 const USERNAME_RE      = /^[a-zA-Z0-9_\-]{3,32}$/;
 const CLEAN_NAME_RE    = /^[a-zA-Z0-9][a-zA-Z0-9._\-()\s]{0,253}$/;
 const REGISTRY_BRANCH  = 'main';
+const OWNER_RE   = /^[a-zA-Z0-9][a-zA-Z0-9\-]{0,37}$/;
+const REPO_RE    = /^[a-zA-Z0-9_\.\-]{1,100}$/;
+const BRANCH_RE  = /^[a-zA-Z0-9_\.\-\/]{1,250}$/;
+const FOLDER_RE  = /^[a-zA-Z0-9_\.\-]{1,100}$/;
 
 const BLOCKED_EXTS = new Set([
   'exe','bat','cmd','com','msi','ps1','psm1',
@@ -66,11 +73,11 @@ const SEC = {
   'X-Content-Type-Options':    'nosniff',
   'X-Frame-Options':           'DENY',
   'Referrer-Policy':           'no-referrer',
-  'Permissions-Policy':        'camera=(), microphone=(), geolocation=()',
+  'Permissions-Policy':        'camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=(), clipboard-read=(), clipboard-write=(), screen-wake-lock=(), accelerometer=(), gyroscope=(), magnetometer=()',
   'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',
   'Content-Security-Policy':
-    "default-src 'none'; script-src 'self' 'unsafe-inline'; " +
-    "style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+    "default-src 'none'; script-src 'none'; " +
+    "style-src 'none'; img-src 'none'; " +
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'none';",
   'Cache-Control': 'no-store',
 };
@@ -82,7 +89,7 @@ function corsHeaders(req) {
   return {
     'Access-Control-Allow-Origin':      ok ? o : 'null',
     'Access-Control-Allow-Methods':     'GET,POST,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers':     'Content-Type,X-Session-Token',
+    'Access-Control-Allow-Headers':     'Content-Type',
     'Access-Control-Allow-Credentials': 'true',
     'Vary': 'Origin',
   };
@@ -172,11 +179,48 @@ async function timingSafeEq(a, b) {
   let d = 0; for (let i = 0; i < ua.length; i++) d |= ua[i] ^ ub[i];
   return d === 0;
 }
-async function pbkdf2Hash(password, salt) {
+const PBKDF2_ITERS_CURRENT = 600_000;  // OWASP 2023 minimum for PBKDF2-SHA256
+const PBKDF2_ITERS_LEGACY  = 100_000;  // iteration count used before Fix 8
+
+async function pbkdf2Hash(password, salt, iterations = PBKDF2_ITERS_CURRENT) {
   const km = await crypto.subtle.importKey('raw', ENC.encode(password), 'PBKDF2', false, ['deriveBits']);
   return new Uint8Array(await crypto.subtle.deriveBits(
-    { name:'PBKDF2', salt, iterations:100000, hash:'SHA-256' }, km, 256
+    { name:'PBKDF2', salt, iterations, hash:'SHA-256' }, km, 256
   ));
+}
+
+
+// ── Stateless blob-token (Fix 2: prevents orphan-blob injection) ──
+async function blobTokenSign(jti, safeName, index, blobSha, secret) {
+  return hmacSign(`blob:${jti}:${safeName}:${index}:${blobSha}`, secret);
+}
+
+// ── RFC 5987 Content-Disposition (Fix 5) ─────────────────────
+function contentDisposition(safeName) {
+  const ascii = safeName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\/]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(safeName)}`;
+}
+
+// ── Hydrate session with fresh GitHub credentials (Fix 3) ────
+// Session token only carries {username, display, jti, exp}.
+// Each authenticated request re-fetches the encrypted PAT from
+// the registry so the token itself never carries long-lived credentials.
+async function getFullSession(sess, env, secret) {
+  if (!sess || !sess.username) return null;
+  const rec = await getUser(sess.username, env).catch(() => null);
+  if (!rec) return null;
+  const { content: user } = rec;
+  let ghToken;
+  try { ghToken = await aesDecrypt(user.encGhToken, secret, `user-token:${user.username}`); }
+  catch { return null; }
+  return {
+    ...sess,
+    ghToken,
+    ghOwner:  user.ghOwner,
+    ghRepo:   user.ghRepo,
+    ghBranch: user.ghBranch,
+    folder:   user.folder,
+  };
 }
 
 // ── Session tokens (AES-encrypted + HMAC-signed) ──────────
@@ -265,7 +309,7 @@ const regH = env => ({
   'User-Agent': 'StoreGit/1',
 });
 const regBase = env =>
-  `https://api.github.com/repos/${env.REGISTRY_GITHUB_OWNER}/${env.REGISTRY_GITHUB_REPO}`;
+  `https://api.github.com/repos/${encodeURIComponent(env.REGISTRY_GITHUB_OWNER)}/${encodeURIComponent(env.REGISTRY_GITHUB_REPO)}`;
 
 async function readReg(path, env) {
   const res = await fetch(`${regBase(env)}/contents/${path}?ref=${REGISTRY_BRANCH}`, { headers: regH(env) });
@@ -300,7 +344,7 @@ const ghH = token => ({
 async function listFiles(sess) {
   const { ghToken, ghOwner, ghRepo, ghBranch, folder } = sess;
   const res = await fetch(
-    `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents/${folder}?ref=${ghBranch}`,
+    `https://api.github.com/repos/${encodeURIComponent(ghOwner)}/${encodeURIComponent(ghRepo)}/contents/${encodeURIComponent(folder)}?ref=${encodeURIComponent(ghBranch)}`,
     { headers: ghH(ghToken) }
   );
   if (res.status === 404) return [];
@@ -319,7 +363,7 @@ async function listFiles(sess) {
 
 async function readIndex(sess) {
   const { ghToken, ghOwner, ghRepo, ghBranch, folder } = sess;
-  const url = `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents/${indexP(folder)}?ref=${ghBranch}`;
+  const url = `https://api.github.com/repos/${encodeURIComponent(ghOwner)}/${encodeURIComponent(ghRepo)}/contents/${encodeURIComponent(indexP(folder))}?ref=${encodeURIComponent(ghBranch)}`;
   const res = await fetch(url, { headers: ghH(ghToken) });
   if (res.status === 404) return { data: {}, sha: null };
   if (!res.ok) return { data: {}, sha: null };
@@ -329,7 +373,7 @@ async function readIndex(sess) {
 
 async function writeIndex(sess, data, existingSha) {
   const { ghToken, ghOwner, ghRepo, ghBranch, folder } = sess;
-  const url = `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents/${indexP(folder)}`;
+  const url = `https://api.github.com/repos/${encodeURIComponent(ghOwner)}/${encodeURIComponent(ghRepo)}/contents/${encodeURIComponent(indexP(folder))}`;
   const res = await fetch(url, {
     method: 'PUT', headers: ghH(ghToken),
     body: JSON.stringify({
@@ -347,7 +391,7 @@ async function writeIndex(sess, data, existingSha) {
 async function createBlob(sess, b64Content) {
   const { ghToken, ghOwner, ghRepo } = sess;
   const res = await fetch(
-    `https://api.github.com/repos/${ghOwner}/${ghRepo}/git/blobs`,
+    `https://api.github.com/repos/${encodeURIComponent(ghOwner)}/${encodeURIComponent(ghRepo)}/git/blobs`,
     { method:'POST', headers: ghH(ghToken), body: JSON.stringify({ content: b64Content, encoding:'base64' }) }
   );
   if (!res.ok) throw new Error('blob_fail');
@@ -357,7 +401,7 @@ async function createBlob(sess, b64Content) {
 // ── Small file upload (≤ 20 MB) via Contents API ─────────
 async function uploadSmall(sess, filename, b64) {
   const { ghToken, ghOwner, ghRepo, ghBranch, folder } = sess;
-  const url = `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents/${folder}/${filename}`;
+  const url = `https://api.github.com/repos/${encodeURIComponent(ghOwner)}/${encodeURIComponent(ghRepo)}/contents/${encodeURIComponent(folder)}/${encodeURIComponent(filename)}`;
   let sha = null;
   const chk = await fetch(`${url}?ref=${ghBranch}`, { headers: ghH(ghToken) });
   if (chk.ok) sha = (await chk.json()).sha;
@@ -372,7 +416,7 @@ async function uploadSmall(sess, filename, b64) {
 async function finalizeChunkedUpload(sess, safeName, blobs, totalSize, chunkSize) {
   const { ghToken, ghOwner, ghRepo, ghBranch, folder } = sess;
   const gh   = ghH(ghToken);
-  const base = `https://api.github.com/repos/${ghOwner}/${ghRepo}`;
+  const base = `https://api.github.com/repos/${encodeURIComponent(ghOwner)}/${encodeURIComponent(ghRepo)}`;
 
   // Build manifest content and create a blob for it
   const manifest = {
@@ -430,7 +474,7 @@ async function finalizeChunkedUpload(sess, safeName, blobs, totalSize, chunkSize
 async function deleteChunked(sess, safeName) {
   const { ghToken, ghOwner, ghRepo, ghBranch, folder } = sess;
   const gh   = ghH(ghToken);
-  const base = `https://api.github.com/repos/${ghOwner}/${ghRepo}`;
+  const base = `https://api.github.com/repos/${encodeURIComponent(ghOwner)}/${encodeURIComponent(ghRepo)}`;
 
   // List chunk files to get their paths (manifest tells us count but listing confirms actual files)
   const chunkDirUrl = `${base}/contents/${chunkDir(folder, safeName)}?ref=${ghBranch}`;
@@ -483,7 +527,7 @@ async function deleteChunked(sess, safeName) {
 async function deleteRegular(sess, filename, sha) {
   const { ghToken, ghOwner, ghRepo, ghBranch, folder } = sess;
   const res = await fetch(
-    `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents/${folder}/${filename}`,
+    `https://api.github.com/repos/${encodeURIComponent(ghOwner)}/${encodeURIComponent(ghRepo)}/contents/${encodeURIComponent(folder)}/${encodeURIComponent(filename)}`,
     { method:'DELETE', headers: ghH(ghToken), body: JSON.stringify({ message:`Delete ${filename}`, sha, branch: ghBranch }) }
   );
   if (!res.ok) throw new Error('delete_fail');
@@ -543,8 +587,16 @@ export async function onRequest({ request, env, params }) {
     if (!username||!password||!ghToken||!ghOwner||!ghRepo) return fail(request, 400);
     if (!USERNAME_RE.test(username)) return jsonRes(request,{error:'Username must be 3–32 chars: letters, numbers, hyphens, underscores'},400);
     if (password.length < 8) return jsonRes(request,{error:'Password must be at least 8 characters'},400);
+    if (!OWNER_RE.test(ghOwner))   return jsonRes(request,{error:"Invalid GitHub owner name"},400);
+    if (!REPO_RE.test(ghRepo))     return jsonRes(request,{error:"Invalid GitHub repository name"},400);
+    if (!BRANCH_RE.test(ghBranch)) return jsonRes(request,{error:"Invalid branch name"},400);
+    if (!FOLDER_RE.test(folder))   return jsonRes(request,{error:"Invalid folder name (letters, numbers, hyphens, underscores, dots only)"},400);
 
     if (await getUser(username, env)) return fail(request, 409);
+
+    // Fix 6: validate token format server-side — client-side prefix check can be bypassed
+    if (!/^(ghp_[a-zA-Z0-9]{36,}|github_pat_[a-zA-Z0-9_]{80,})$/.test(ghToken))
+      return jsonRes(request, {error: 'Invalid GitHub token format'}, 400);
 
     const repoCheck = await fetch(
       `https://api.github.com/repos/${ghOwner}/${ghRepo}`,
@@ -596,6 +648,10 @@ export async function onRequest({ request, env, params }) {
     const { username, password } = body||{};
     if (!username||!password) return fail(request, 400);
 
+    // Rate-limit by IP (prevents distributed attacks) AND by username (prevents
+    // single-account brute-force from many IPs). Check IP first to fail fast.
+    if (await checkRate(`login:user:${username.toLowerCase()}`, RATE_MAX_LOGIN_USER, env)) return fail(request, 429);
+
     const rec = await getUser(username, env);
     if (!rec) {
       await pbkdf2Hash(password, crypto.getRandomValues(new Uint8Array(16)));
@@ -604,16 +660,41 @@ export async function onRequest({ request, env, params }) {
     }
 
     const { content: user } = rec;
-    const salt    = b64urlDec(user.pwSalt);
-    const stored  = b64urlDec(user.pwHash);
-    const derived = await pbkdf2Hash(password, salt);
-    let diff = 0; for (let i=0;i<32;i++) diff |= derived[i]^(stored[i]??0);
-    if (diff !== 0) {
-      await new Promise(r=>setTimeout(r,300+Math.random()*200));
-      return fail(request, 401);
+    const salt   = b64urlDec(user.pwSalt);
+    const stored = b64urlDec(user.pwHash);
+
+    // Hash migration: try current iteration count first, then legacy.
+    // Existing accounts hashed with PBKDF2_ITERS_LEGACY (100k) would be locked out
+    // if we only derived with 600k. On a legacy match we immediately re-hash and
+    // save the upgraded hash so the account is fully migrated after first login.
+    const derivedCurrent = await pbkdf2Hash(password, salt, PBKDF2_ITERS_CURRENT);
+    let diffCurrent = 0; for (let i=0;i<32;i++) diffCurrent |= derivedCurrent[i]^(stored[i]??0);
+
+    let isLegacy = false;
+    if (diffCurrent !== 0) {
+      const derivedLegacy = await pbkdf2Hash(password, salt, PBKDF2_ITERS_LEGACY);
+      let diffLegacy = 0; for (let i=0;i<32;i++) diffLegacy |= derivedLegacy[i]^(stored[i]??0);
+      if (diffLegacy !== 0) {
+        await new Promise(r=>setTimeout(r,300+Math.random()*200));
+        return fail(request, 401);
+      }
+      isLegacy = true; // correct password, but stored with old iteration count
+    }
+
+    // Upgrade legacy hash to current iteration count transparently on login
+    if (isLegacy) {
+      try {
+        const newHash = await pbkdf2Hash(password, salt, PBKDF2_ITERS_CURRENT);
+        const existing = await getUser(user.username, env);
+        if (existing) {
+          const upgraded = { ...existing.content, pwHash: b64urlEnc(newHash) };
+          await writeReg(userPath(user.username), upgraded, 'Upgrade password hash iterations', env, existing.sha);
+        }
+      } catch { /* non-fatal — user is still authenticated; upgrade retried next login */ }
     }
 
     await clearRate(`login:${ip}`, env);
+    await clearRate(`login:user:${user.username}`, env);
 
     let ghToken;
     try { ghToken = await aesDecrypt(user.encGhToken, secret, `user-token:${user.username}`); }
@@ -621,33 +702,36 @@ export async function onRequest({ request, env, params }) {
 
     const token = await createToken({
       username: user.username, display: user.displayName||user.username,
-      ghToken, ghOwner: user.ghOwner, ghRepo: user.ghRepo,
-      ghBranch: user.ghBranch, folder: user.folder,
     }, secret);
 
     return jsonRes(request, { ok:true, display: user.displayName||user.username }, 200, {
-      'Set-Cookie':      `sg_sess=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_TTL/1000}`,
-      'X-Session-Token': token,
+      'Set-Cookie': `__Host-sg_sess=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_TTL/1000}`,
     });
   }
 
   // ── POST /api/logout ──────────────────────────────────────
   if (route === 'logout' && method === 'POST') {
     return jsonRes(request, { ok:true }, 200, {
-      'Set-Cookie': 'sg_sess=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0',
+      'Set-Cookie': '__Host-sg_sess=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0',
     });
   }
 
   // ── Auth guard ────────────────────────────────────────────
-  const rawToken = request.headers.get('X-Session-Token') || '';
-  const sess     = await verifyToken(rawToken, secret);
+  const _cookieHdr = request.headers.get('Cookie') || '';
+  const rawToken   = (_cookieHdr.match(/(?:^|;\s*)__Host-sg_sess=([^;]+)/))?.[1] || '';
+  const sess       = await verifyToken(rawToken, secret);
   if (!sess) return fail(request, 401);
+
+  // Re-hydrate: fetch fresh GitHub credentials from registry.
+  // The session token intentionally carries NO ghToken (Fix 3).
+  const fullSess = await getFullSession(sess, env, secret);
+  if (!fullSess) return fail(request, 401);
 
   // ── GET /api/me ───────────────────────────────────────────
   if (route === 'me' && method === 'GET') {
     return jsonRes(request, {
-      username: sess.username, display: sess.display,
-      repo: `${sess.ghOwner}/${sess.ghRepo}`, folder: sess.folder,
+      username: fullSess.username, display: fullSess.display,
+      repo: `${fullSess.ghOwner}/${fullSess.ghRepo}`, folder: fullSess.folder,
     });
   }
 
@@ -656,11 +740,11 @@ export async function onRequest({ request, env, params }) {
   // Internal files (.storegit, .chunks/, .manifests/) are never returned.
   if (route === 'files' && method === 'GET') {
     try {
-      const regular = await listFiles(sess);
+      const regular = await listFiles(fullSess);
 
       let chunked = [];
       try {
-        const { data: idx } = await readIndex(sess);
+        const { data: idx } = await readIndex(fullSess);
         chunked = Object.entries(idx).map(([name, info]) => ({
           name,
           size: info.totalSize,
@@ -700,11 +784,11 @@ export async function onRequest({ request, env, params }) {
     try {
       if (decodedSize > SMALL_MAX_BYTES) {
         // > 5 MB: Git Blobs API (supports large files without Contents API 100MB JSON limit)
-        const blobSha = await createBlob(sess, b64);
-        const { ghToken, ghOwner, ghRepo, ghBranch, folder } = sess;
+        const blobSha = await createBlob(fullSess, b64);
+        const { ghToken, ghOwner, ghRepo, ghBranch, folder } = fullSess;
         const gh   = ghH(ghToken);
-        const base = `https://api.github.com/repos/${ghOwner}/${ghRepo}`;
-        const refRes = await fetch(`${base}/git/ref/heads/${ghBranch}`, { headers:gh });
+        const base = `https://api.github.com/repos/${encodeURIComponent(ghOwner)}/${encodeURIComponent(ghRepo)}`;
+        const refRes = await fetch(`${base}/git/ref/heads/${encodeURIComponent(ghBranch)}`, { headers:gh });
         if (!refRes.ok) throw new Error('ref_fail');
         const { object:{ sha:headSha } } = await refRes.json();
         const commitRes = await fetch(`${base}/git/commits/${headSha}`, { headers:gh });
@@ -724,7 +808,7 @@ export async function onRequest({ request, env, params }) {
         });
       } else {
         // ≤ 5 MB: Contents API (simple PUT, one call)
-        await uploadSmall(sess, safe, b64);
+        await uploadSmall(fullSess, safe, b64);
       }
       return jsonRes(request, { ok:true, name:safe, size:decodedSize });
     } catch { return fail(request, 502); }
@@ -750,13 +834,15 @@ export async function onRequest({ request, env, params }) {
     if (!safe) return fail(request,415);
 
     // Magic bytes check only on first chunk
+    // Magic-byte check on every chunk that could be an executable header (idx 0 = file start)
     if (idx === 0 && !checkMagicBase64(b64)) return fail(request,415);
 
     const decodedSize = Math.floor(b64.length * 3 / 4);
 
     try {
-      const blobSha = await createBlob(sess, b64);   // forward directly — no re-encoding
-      return jsonRes(request, { ok:true, blobSha, index: idx, size: decodedSize });
+      const blobSha   = await createBlob(fullSess, b64);   // forward directly — no re-encoding
+      const blobToken = await blobTokenSign(sess.jti, safe, idx, blobSha, secret);
+      return jsonRes(request, { ok:true, blobSha, blobToken, index: idx, size: decodedSize });
     } catch { return fail(request, 502); }
   }
 
@@ -772,23 +858,36 @@ export async function onRequest({ request, env, params }) {
     if (blobs.length !== totalChunks) return fail(request,400);
     if (totalChunks > MAX_TOTAL_CHUNKS) return fail(request,413);
 
-    // Validate every blob SHA
+    // Bounds-check user-supplied integers (Fix 2)
+    const MAX_FILE_BYTES = MAX_TOTAL_CHUNKS * CHUNK_B64_MAX;
+    if (!Number.isInteger(totalSize) || totalSize < 1 || totalSize > MAX_FILE_BYTES)
+      return fail(request, 400);
+    if (chunkSize !== undefined && (!Number.isInteger(chunkSize) || chunkSize < 1 || chunkSize > CHUNK_B64_MAX))
+      return fail(request, 400);
+
+    // Fix 3 (TDZ): sanitize name BEFORE the verification loop — previously `safe` was
+    // declared after the loop, causing a ReferenceError (Temporal Dead Zone) that silently
+    // swallowed every HMAC check and returned 502 for all chunked uploads.
+    const safe = sanitize(String(name));
+    if (!safe) return fail(request, 415);
+
+    // Validate every blob SHA AND verify server-issued HMAC token (prevents orphan-blob injection)
     for (const b of blobs) {
-      if (typeof b.blobSha !== 'string' || !SHA_RE.test(b.blobSha)) return fail(request,400);
-      if (typeof b.index  !== 'number'  || b.index < 0)             return fail(request,400);
-      if (typeof b.size   !== 'number'  || b.size  < 1)             return fail(request,400);
+      if (typeof b.blobSha   !== 'string' || !SHA_RE.test(b.blobSha)) return fail(request,400);
+      if (typeof b.blobToken !== 'string')                             return fail(request,400);
+      if (typeof b.index     !== 'number' || b.index < 0)             return fail(request,400);
+      if (typeof b.size      !== 'number' || b.size  < 1)             return fail(request,400);
+      const expected = await blobTokenSign(sess.jti, safe, b.index, b.blobSha, secret);
+      if (!(await timingSafeEq(b.blobToken, expected))) return fail(request, 403);
     }
 
-    const safe = sanitize(String(name));
-    if (!safe) return fail(request,415);
-
     try {
-      await finalizeChunkedUpload(sess, safe, blobs, totalSize, chunkSize);
+      await finalizeChunkedUpload(fullSess, safe, blobs, totalSize, chunkSize);
 
       // Update the index so /api/files returns this file
-      const { data: idx, sha: idxSha } = await readIndex(sess);
+      const { data: idx, sha: idxSha } = await readIndex(fullSess);
       idx[safe] = { totalSize, totalChunks, uploadedAt: new Date().toISOString() };
-      await writeIndex(sess, idx, idxSha);
+      await writeIndex(fullSess, idx, idxSha);
 
       return jsonRes(request, { ok:true, name:safe });
     } catch { return fail(request, 502); }
@@ -803,12 +902,12 @@ export async function onRequest({ request, env, params }) {
     const safe = sanitize(nameParam);
     if (!safe) return fail(request,400);
 
-    const { ghToken, ghOwner, ghRepo, ghBranch, folder } = sess;
+    const { ghToken, ghOwner, ghRepo, ghBranch, folder } = fullSess;
 
     // Check index to see if this is a chunked file
     let manifest = null;
     try {
-      const { data: idx } = await readIndex(sess);
+      const { data: idx } = await readIndex(fullSess);
       if (idx[safe]) {
         const mUrl = `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents/${manifestP(folder,safe)}?ref=${ghBranch}`;
         const mRes = await fetch(mUrl, { headers: ghH(ghToken) });
@@ -851,7 +950,7 @@ export async function onRequest({ request, env, params }) {
         headers: {
           ...SEC, ...corsHeaders(request),
           'Content-Type':        safeMime(safe),
-          'Content-Disposition': `attachment; filename="${safe.replace(/"/g,'\\"')}"`,
+          'Content-Disposition': contentDisposition(safe),
           'Content-Length':      String(manifest.totalSize),
           'Accept-Ranges':       'none',
         },
@@ -871,7 +970,7 @@ export async function onRequest({ request, env, params }) {
       headers: {
         ...SEC, ...corsHeaders(request),
         'Content-Type':        safeMime(safe),
-        'Content-Disposition': `attachment; filename="${safe.replace(/"/g,'\\"')}"`,
+        'Content-Disposition': contentDisposition(safe),
         ...(len?{'Content-Length':len}:{}),
         'Accept-Ranges': 'bytes',
       },
@@ -890,15 +989,15 @@ export async function onRequest({ request, env, params }) {
 
     if (chunked) {
       try {
-        await deleteChunked(sess, safe);
-        const { data: idx, sha: idxSha } = await readIndex(sess);
+        await deleteChunked(fullSess, safe);
+        const { data: idx, sha: idxSha } = await readIndex(fullSess);
         delete idx[safe];
-        await writeIndex(sess, idx, idxSha);
+        await writeIndex(fullSess, idx, idxSha);
         return jsonRes(request, { ok:true });
       } catch { return fail(request,502); }
     } else {
       if (typeof sha !== 'string' || !SHA_RE.test(sha)) return fail(request,400);
-      try { await deleteRegular(sess, safe, sha); return jsonRes(request, { ok:true }); }
+      try { await deleteRegular(fullSess, safe, sha); return jsonRes(request, { ok:true }); }
       catch { return fail(request,502); }
     }
   }
