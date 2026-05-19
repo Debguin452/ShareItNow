@@ -2,18 +2,6 @@
 const CHUNK_THRESHOLD = 5  * 1024 * 1024;
 const CHUNK_SIZE      = 10 * 1024 * 1024;
 const MAX_FILE_SIZE   = 5  * 1024 * 1024 * 1024;
-const BLOCKED_EXTS = new Set([
-  'exe','bat','cmd','com','msi','ps1','psm1',
-  'sh','bash','zsh','fish','command',
-  'php','php3','php4','php5','php7','php8','phtml','phar',
-  'asp','aspx','cshtml','jsp','jspx',
-  'py','pyc','pyw','rb','pl','cgi','lua',
-  'js','mjs','cjs','ts','tsx','jsx',
-  'html','htm','xhtml','svg','xml',
-  'htaccess','htpasswd','dll','so','dylib','sys',
-  'vbs','vbe','wsf','wsh','hta','jar','war','class',
-  'scr','pif','reg','lnk','app','dmg','pkg','deb','rpm','apk',
-]);
 let loginLocked   = false;
 let uploadPending = [];
 let _signupData   = {};
@@ -223,9 +211,10 @@ function renderFiles(files) {
   for(const f of visible){
     const row  = elem('div','file-row');
     const badge = elem('div','file-type-badge');
-    badge.textContent = fileExt(f.name);
+    const displayName = f.originalName || f.name;
+    badge.textContent = fileExt(displayName);
     const info = elem('div','file-info');
-    const nm   = elem('div','file-name'); nm.textContent=f.name; nm.title=f.name;
+    const nm   = elem('div','file-name'); nm.textContent=displayName; nm.title=displayName;
     const mt   = elem('div','file-meta'); mt.textContent=fmtSize(f.size);
     info.append(nm,mt);
     const chevron = elem('div','file-chevron');
@@ -235,8 +224,9 @@ function renderFiles(files) {
     el.appendChild(row);
   }
 }
-async function deleteFile(name, sha, chunked) {
-  showModal('Delete file', `“${name}” will be permanently deleted and cannot be recovered.`, 'Delete', 'btn-danger', async () => {
+async function deleteFile(name, sha, chunked, displayName) {
+  const label = displayName || name;
+  showModal('Delete file', `“${label}” will be permanently deleted and cannot be recovered.`, 'Delete', 'btn-danger', async () => {
     try {
       const body = chunked ? { name, chunked: true } : { name, sha };
       const r = await fetch('/api/delete', {
@@ -249,7 +239,8 @@ async function deleteFile(name, sha, chunked) {
     } catch { toast('Delete failed.', 'error'); }
   });
 }
-async function downloadFile(name, size) {
+async function downloadFile(name, size, originalName) {
+  const saveAs = originalName || name;
   const bar=document.getElementById('dl-bar'), fill=document.getElementById('dl-fill'),
         lbl=document.getElementById('dl-label'), fnEl=document.getElementById('dl-filename');
   const url=`/api/download?name=${encodeURIComponent(name)}`;
@@ -261,7 +252,7 @@ async function downloadFile(name, size) {
     const knownSize=contentLen||size||0;
     const showBar=knownSize>2*1024*1024&&typeof ReadableStream!=='undefined'&&r.body;
     if(showBar){
-      fnEl.textContent=name; fill.style.width='0%'; lbl.textContent='Starting…'; bar.style.display='block';
+      fnEl.textContent=saveAs; fill.style.width='0%'; lbl.textContent='Starting…'; bar.style.display='block';
       const reader=r.body.getReader(), chunks=[];
       let received=0;
       while(true){
@@ -272,8 +263,8 @@ async function downloadFile(name, size) {
           fill.style.width=pct+'%'; lbl.textContent=`${fmtSize(received)} of ${fmtSize(knownSize)}`;
         } else { lbl.textContent=`${fmtSize(received)} downloaded…`; }
       }
-      bar.style.display='none'; triggerSave(new Blob(chunks),name);
-    } else { triggerSave(await r.blob(),name); }
+      bar.style.display='none'; triggerSave(new Blob(chunks),saveAs);
+    } else { triggerSave(await r.blob(),saveAs); }
     toast('Saved to Downloads.','ok');
   } catch{ document.getElementById('dl-bar').style.display='none'; toast('Download failed.','error'); }
 }
@@ -291,8 +282,6 @@ function onFilePicked(fileList) {
   const rejected=[];
   for(const f of fileList){
     if(f.size>MAX_FILE_SIZE){rejected.push(`"${f.name}" exceeds the size limit.`);continue;}
-    const ext=f.name.split('.').pop()?.toLowerCase()||'';
-    if(BLOCKED_EXTS.has(ext)){rejected.push(`"${f.name}" — file type not permitted.`);continue;}
     const duplicate = uploadPending.find(p =>
       p.file.name === f.name &&
       p.file.size === f.size &&
@@ -530,13 +519,14 @@ const FD_AUDIO = new Set(['mp3','wav','ogg','m4a','flac','aac','opus']);
 const FD_VIDEO = new Set(['mp4','webm','mov','m4v']);
 const FD_TEXT  = new Set(['txt','md','markdown','csv','json','log','ini','cfg','conf','yaml','yml','toml','nfo','diff','patch']);
 function openFileDetail(f) {
-  document.getElementById('fd-icon').textContent = fileExt(f.name);
-  document.getElementById('fd-name').textContent = f.name;
+  const displayName = f.originalName || f.name;
+  document.getElementById('fd-icon').textContent = fileExt(displayName);
+  document.getElementById('fd-name').textContent = displayName;
   document.getElementById('fd-meta').textContent = fmtSize(f.size);
-  document.getElementById('fd-dl-btn').onclick  = () => downloadFile(f.name, f.size);
+  document.getElementById('fd-dl-btn').onclick  = () => downloadFile(f.name, f.size, displayName);
   document.getElementById('fd-del-btn').onclick = () => {
     closeFileDetail();
-    setTimeout(() => deleteFile(f.name, f.sha, f.chunked || false), 250);
+    setTimeout(() => deleteFile(f.name, f.sha, f.chunked || false, displayName), 250);
   };
   document.getElementById('fd-preview').innerHTML =
     '<div class="fd-preview-loading"><span class="spinner"></span> Loading preview…</div>';
@@ -548,7 +538,8 @@ function closeFileDetail() {
 }
 async function loadFilePreview(f) {
   const el  = document.getElementById('fd-preview');
-  const ext = (f.name.split('.').pop() || '').toLowerCase();
+  const displayName = f.originalName || f.name;
+  const ext = (displayName.split('.').pop() || '').toLowerCase();
   function noPreview(msg) {
     const wrap = document.createElement('div');
     wrap.className = 'fd-preview-none';
