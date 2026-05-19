@@ -42,6 +42,8 @@ const BLOCKED_MAGIC = [
   [0,[0x3C,0x68,0x74,0x6D,0x6C]],[0,[0x3C,0x48,0x54,0x4D,0x4C]],
 ];
 
+const _memRate = new Map();
+
 const SEC = {
   'X-Content-Type-Options':    'nosniff',
   'X-Frame-Options':           'DENY',
@@ -181,6 +183,22 @@ async function getFullSession(sess, env, secret) {
     folder:   user.folder,
   };
 }
+function isHttps(req) {
+  try { return new URL(req.url).protocol === 'https:'; } catch { return false; }
+}
+function buildSetCookie(req, token, maxAge) {
+  const https  = isHttps(req);
+  const name   = https ? '__Host-sg_sess' : 'sg_sess';
+  const secure = https ? '; Secure' : '';
+  return `${name}=${token}; Path=/; HttpOnly${secure}; SameSite=Strict; Max-Age=${maxAge}`;
+}
+function readSessionCookie(req) {
+  const hdr  = req.headers.get('Cookie') || '';
+  const name = isHttps(req) ? '__Host-sg_sess' : 'sg_sess';
+  const re   = new RegExp('(?:^|;\\s*)' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]+)');
+  return (hdr.match(re))?.[1] || '';
+}
+
 async function createToken(payload, secret) {
   const full = { ...payload, jti: hexEnc(crypto.getRandomValues(new Uint8Array(16))), exp: Date.now() + SESSION_TTL };
   const enc  = await aesEncrypt(JSON.stringify(full), secret, 'session');
@@ -205,18 +223,24 @@ function getIP(req) {
 }
 async function checkRate(key, max, env) {
   const now = Date.now();
-  const r = await env.RATE_LIMIT_KV.get(key, 'json').catch(() => null);
+  const kv  = env.RATE_LIMIT_KV || null;
+  let r = kv
+    ? await kv.get(key, 'json').catch(() => null)
+    : _memRate.get(key) || null;
   if (!r || now > r.resetAt) {
     const f = { count: 1, resetAt: now + RATE_WINDOW_MS };
-    await env.RATE_LIMIT_KV.put(key, JSON.stringify(f), { expirationTtl: Math.ceil(RATE_WINDOW_MS / 1000) }).catch(() => {});
+    if (kv) await kv.put(key, JSON.stringify(f), { expirationTtl: Math.ceil(RATE_WINDOW_MS / 1000) }).catch(() => {});
+    else { _memRate.set(key, f); if (_memRate.size > 20000) for (const [k, v] of _memRate) if (now > v.resetAt) _memRate.delete(k); }
     return false;
   }
   r.count++;
-  await env.RATE_LIMIT_KV.put(key, JSON.stringify(r), { expirationTtl: Math.ceil((r.resetAt - now) / 1000) }).catch(() => {});
+  if (kv) await kv.put(key, JSON.stringify(r), { expirationTtl: Math.ceil((r.resetAt - now) / 1000) }).catch(() => {});
+  else _memRate.set(key, r);
   return r.count > max;
 }
 async function clearRate(key, env) {
-  await env.RATE_LIMIT_KV.delete(key).catch(() => {});
+  if (env.RATE_LIMIT_KV) await env.RATE_LIMIT_KV.delete(key).catch(() => {});
+  else _memRate.delete(key);
 }
 function sanitize(name) {
   if (!name || typeof name !== 'string') return null;
@@ -514,7 +538,7 @@ async function _handleRequest({ request, env, params }) {
     if (!BRANCH_RE.test(ghBranch)) return jsonRes(request,{error:"Invalid branch name"},400);
     if (!FOLDER_RE.test(folder))   return jsonRes(request,{error:"Invalid folder name (letters, numbers, hyphens, underscores, dots only)"},400);
     if (await getUser(username, env)) return fail(request, 409);
-    if (!/^(ghp_[a-zA-Z0-9]{36,}|github_pat_[a-zA-Z0-9_]{80,})$/.test(ghToken))
+    if (!/^(ghp_[a-zA-Z0-9]{36,}|github_pat_[a-zA-Z0-9_]{40,})$/.test(ghToken))
       return jsonRes(request, {error: 'Invalid GitHub token format'}, 400);
     const repoCheck = await fetch(
       `https://api.github.com/repos/${ghOwner}/${ghRepo}`,
@@ -579,24 +603,20 @@ async function _handleRequest({ request, env, params }) {
     }
     await clearRate(`login:${ip}`, env);
     await clearRate(`login:user:${user.username}`, env);
-    let ghToken;
-    try { ghToken = await aesDecrypt(user.encGhToken, secret, `user-token:${user.username}`); }
-    catch { return fail(request, 500); }
     const token = await createToken({
       username: user.username, display: user.displayName||user.username,
     }, secret);
     return jsonRes(request, { ok:true, display: user.displayName||user.username }, 200, {
-      'Set-Cookie': `__Host-sg_sess=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_TTL/1000}`,
+      'Set-Cookie': buildSetCookie(request, token, SESSION_TTL / 1000),
     });
   }
   if (route === 'logout' && method === 'POST') {
     return jsonRes(request, { ok:true }, 200, {
-      'Set-Cookie': '__Host-sg_sess=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0',
+      'Set-Cookie': buildSetCookie(request, '', 0),
     });
   }
-  const _cookieHdr = request.headers.get('Cookie') || '';
-  const rawToken   = (_cookieHdr.match(/(?:^|;\s*)__Host-sg_sess=([^;]+)/))?.[1] || '';
-  const sess       = await verifyToken(rawToken, secret);
+  const rawToken = readSessionCookie(request);
+  const sess     = await verifyToken(rawToken, secret);
   if (!sess) return fail(request, 401);
   const fullSess = await getFullSession(sess, env, secret);
   if (!fullSess) return fail(request, 401);
