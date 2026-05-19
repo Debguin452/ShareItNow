@@ -89,7 +89,7 @@ function b64Enc(u8) {
   return btoa(s);
 }
 function b64Dec(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
-function b64urlEnc(u8) { return b64Enc(u8).replace(/\+/g,'-').replace(/\
+function b64urlEnc(u8) { return b64Enc(u8).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''); }
 function b64urlDec(s) {
   const p = s.replace(/-/g,'+').replace(/_/g,'/');
   return b64Dec(p + '='.repeat((4 - p.length%4)%4));
