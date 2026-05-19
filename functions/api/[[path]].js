@@ -41,7 +41,7 @@ const BLOCKED_MAGIC = [
   [0,[0x3C,0x73,0x63,0x72,0x69,0x70,0x74]],
   [0,[0x3C,0x68,0x74,0x6D,0x6C]],[0,[0x3C,0x48,0x54,0x4D,0x4C]],
 ];
-const _memRate = new Map();
+
 const SEC = {
   'X-Content-Type-Options':    'nosniff',
   'X-Frame-Options':           'DENY',
@@ -96,6 +96,14 @@ function b64urlDec(s) {
 }
 function ab2b64(buf) { return b64Enc(new Uint8Array(buf)); }
 function hexEnc(u8) { return Array.from(u8).map(b=>b.toString(16).padStart(2,'0')).join(''); }
+async function gitBlobSha(buffer) {
+  const prefix = ENC.encode(`blob ${buffer.byteLength}\0`);
+  const combined = new Uint8Array(prefix.byteLength + buffer.byteLength);
+  combined.set(prefix);
+  combined.set(new Uint8Array(buffer));
+  const hash = await crypto.subtle.digest('SHA-1', combined);
+  return hexEnc(new Uint8Array(hash));
+}
 function utf8b64(str) {
   return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g,
     (_,p1) => String.fromCharCode(parseInt(p1,16))));
@@ -197,23 +205,18 @@ function getIP(req) {
 }
 async function checkRate(key, max, env) {
   const now = Date.now();
-  let r = env.RATE_LIMIT_KV
-    ? await env.RATE_LIMIT_KV.get(key,'json').catch(()=>null)
-    : _memRate.get(key) || null;
+  const r = await env.RATE_LIMIT_KV.get(key, 'json').catch(() => null);
   if (!r || now > r.resetAt) {
-    const f = { count:1, resetAt: now + RATE_WINDOW_MS };
-    if (env.RATE_LIMIT_KV) await env.RATE_LIMIT_KV.put(key, JSON.stringify(f), { expirationTtl: Math.ceil(RATE_WINDOW_MS/1000) }).catch(()=>{});
-    else _memRate.set(key, f);
+    const f = { count: 1, resetAt: now + RATE_WINDOW_MS };
+    await env.RATE_LIMIT_KV.put(key, JSON.stringify(f), { expirationTtl: Math.ceil(RATE_WINDOW_MS / 1000) }).catch(() => {});
     return false;
   }
   r.count++;
-  if (env.RATE_LIMIT_KV) await env.RATE_LIMIT_KV.put(key, JSON.stringify(r), { expirationTtl: Math.ceil((r.resetAt-now)/1000) }).catch(()=>{});
-  else { _memRate.set(key, r); if (_memRate.size > 20000) for (const [k,v] of _memRate) if (now>v.resetAt) _memRate.delete(k); }
+  await env.RATE_LIMIT_KV.put(key, JSON.stringify(r), { expirationTtl: Math.ceil((r.resetAt - now) / 1000) }).catch(() => {});
   return r.count > max;
 }
 async function clearRate(key, env) {
-  if (env.RATE_LIMIT_KV) await env.RATE_LIMIT_KV.delete(key).catch(()=>{});
-  else _memRate.delete(key);
+  await env.RATE_LIMIT_KV.delete(key).catch(() => {});
 }
 function sanitize(name) {
   if (!name || typeof name !== 'string') return null;
@@ -541,26 +544,14 @@ async function _handleRequest({ request, env, params }) {
     const salt   = b64urlDec(user.pwSalt);
     const stored = b64urlDec(user.pwHash);
     const derivedCurrent = await pbkdf2Hash(password, salt, PBKDF2_ITERS_CURRENT);
-    let diffCurrent = 0; for (let i=0;i<32;i++) diffCurrent |= derivedCurrent[i]^(stored[i]??0);
-    let isLegacy = false;
+    let diffCurrent = 0; for (let i = 0; i < 32; i++) diffCurrent |= derivedCurrent[i] ^ (stored[i] ?? 0);
     if (diffCurrent !== 0) {
       const derivedLegacy = await pbkdf2Hash(password, salt, PBKDF2_ITERS_LEGACY);
-      let diffLegacy = 0; for (let i=0;i<32;i++) diffLegacy |= derivedLegacy[i]^(stored[i]??0);
+      let diffLegacy = 0; for (let i = 0; i < 32; i++) diffLegacy |= derivedLegacy[i] ^ (stored[i] ?? 0);
       if (diffLegacy !== 0) {
-        await new Promise(r=>setTimeout(r,300+Math.random()*200));
+        await new Promise(r => setTimeout(r, 300 + Math.random() * 200));
         return fail(request, 401);
       }
-      isLegacy = true; // correct password, but stored with old iteration count
-    }
-    if (isLegacy) {
-      try {
-        const newHash = await pbkdf2Hash(password, salt, PBKDF2_ITERS_CURRENT);
-        const existing = await getUser(user.username, env);
-        if (existing) {
-          const upgraded = { ...existing.content, pwHash: b64urlEnc(newHash) };
-          await writeReg(userPath(user.username), upgraded, 'Upgrade password hash iterations', env, existing.sha);
-        }
-      } catch { /* non-fatal — user is still authenticated; upgrade retried next login */ }
     }
     await clearRate(`login:${ip}`, env);
     await clearRate(`login:user:${user.username}`, env);
@@ -593,21 +584,27 @@ async function _handleRequest({ request, env, params }) {
   }
   if (route === 'files' && method === 'GET') {
     try {
-      const regular = await listFiles(fullSess);
-      let chunked = [];
-      try {
-        const { data: idx } = await readIndex(fullSess);
-        chunked = Object.entries(idx).map(([name, info]) => ({
-          name,
-          size: info.totalSize,
-          sha: '',
-          chunked: true,
-          parts: info.totalChunks,
+      const [regular, { data: idx }] = await Promise.all([
+        listFiles(fullSess),
+        readIndex(fullSess).catch(() => ({ data: {} })),
+      ]);
+      const chunked = Object.entries(idx)
+        .filter(([, info]) => info.totalChunks)
+        .map(([name, info]) => ({
+          name, size: info.totalSize, sha: '', chunked: true,
+          parts: info.totalChunks, uploadedAt: info.uploadedAt || null,
         }));
-      } catch { /* no index yet — no chunked files */ }
       const chunkedNames = new Set(chunked.map(f => f.name));
-      const cleanRegular = regular.filter(f => !chunkedNames.has(f.name));
-      return jsonRes(request, [...cleanRegular, ...chunked]);
+      const cleanRegular = regular
+        .filter(f => !chunkedNames.has(f.name))
+        .map(f => ({ ...f, uploadedAt: idx[f.name]?.uploadedAt || null, chunked: false }));
+      const all = [...cleanRegular, ...chunked].sort((a, b) => {
+        if (!a.uploadedAt && !b.uploadedAt) return 0;
+        if (!a.uploadedAt) return 1;
+        if (!b.uploadedAt) return -1;
+        return new Date(b.uploadedAt) - new Date(a.uploadedAt);
+      });
+      return jsonRes(request, all);
     } catch { return fail(request, 502); }
   }
   if (route === 'upload' && method === 'POST') {
@@ -647,6 +644,11 @@ async function _handleRequest({ request, env, params }) {
       } else {
         await uploadSmall(fullSess, safe, b64);
       }
+      try {
+        const { data: idx, sha: idxSha } = await readIndex(fullSess);
+        idx[safe] = { uploadedAt: new Date().toISOString(), size: decodedSize };
+        await writeIndex(fullSess, idx, idxSha);
+      } catch {}
       return jsonRes(request, { ok:true, name:safe, size:decodedSize });
     } catch { return fail(request, 502); }
   }
@@ -727,12 +729,13 @@ async function _handleRequest({ request, env, params }) {
               const cp = chunkPath(folder, safe, i);
               const res = await fetch(`${rawBase}/${cp}`, { headers: authHeader });
               if (!res.ok) { controller.error(new Error(`chunk_${i}_missing`)); return; }
-              const reader = res.body.getReader();
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                controller.enqueue(value);
+              const buf = await res.arrayBuffer();
+              const expected = manifest.chunks?.[i]?.blobSha;
+              if (expected) {
+                const actual = await gitBlobSha(buf);
+                if (actual !== expected) { controller.error(new Error(`chunk_${i}_corrupt`)); return; }
               }
+              controller.enqueue(new Uint8Array(buf));
             }
             controller.close();
           } catch (e) { controller.error(e); }
@@ -783,8 +786,14 @@ async function _handleRequest({ request, env, params }) {
       } catch { return fail(request,502); }
     } else {
       if (typeof sha !== 'string' || !SHA_RE.test(sha)) return fail(request,400);
-      try { await deleteRegular(fullSess, safe, sha); return jsonRes(request, { ok:true }); }
-      catch { return fail(request,502); }
+      try {
+        await deleteRegular(fullSess, safe, sha);
+        try {
+          const { data: idx, sha: idxSha } = await readIndex(fullSess);
+          if (idx[safe]) { delete idx[safe]; await writeIndex(fullSess, idx, idxSha); }
+        } catch {}
+        return jsonRes(request, { ok:true });
+      } catch { return fail(request,502); }
     }
   }
   return fail(request, 404);
