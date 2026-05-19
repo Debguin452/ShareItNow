@@ -225,8 +225,32 @@ function sanitize(name) {
   const safe = s.replace(/[^a-zA-Z0-9._\-()\s]/g,'_');
   if (!CLEAN_NAME_RE.test(safe)) return null;
   const ext = safe.split('.').pop()?.toLowerCase() || '';
-  if (BLOCKED_EXTS.has(ext)) return null;
+  if (BLOCKED_EXTS.has(ext)) {
+    const wrapped = safe + '.txt';
+    if (!CLEAN_NAME_RE.test(wrapped)) return null;
+    return wrapped;
+  }
   return safe;
+}
+// Fallback: infer original name for files that pre-date originalName storage in the index.
+// e.g. "script.js.txt" → "script.js", "notes.txt" → "notes.txt" (txt not blocked)
+function unwrapName(storedName) {
+  if (!storedName.endsWith('.txt')) return storedName;
+  const original = storedName.slice(0, -4);
+  if (!original) return storedName;
+  const ext = original.split('.').pop()?.toLowerCase() || '';
+  return BLOCKED_EXTS.has(ext) ? original : storedName;
+}
+// Derives the user-facing filename from the raw input the client sent.
+// Applies identical character cleaning as sanitize() but never adds the .txt suffix,
+// so "notes.js.txt" stays "notes.js.txt" and "script.js" stays "script.js".
+function getOriginalName(rawInput, fallback) {
+  try {
+    const s = String(rawInput).replace(/\0/g,'').replace(/\.\./g,'').replace(/[/\\]/g,'').trim();
+    if (!s) return fallback;
+    const cleaned = s.replace(/[^a-zA-Z0-9._\-()\s]/g,'_');
+    return CLEAN_NAME_RE.test(cleaned) ? cleaned : fallback;
+  } catch { return fallback; }
 }
 function checkMagic(bytes) {
   for (const [off, pat] of BLOCKED_MAGIC) {
@@ -591,13 +615,20 @@ async function _handleRequest({ request, env, params }) {
       const chunked = Object.entries(idx)
         .filter(([, info]) => info.totalChunks)
         .map(([name, info]) => ({
-          name, size: info.totalSize, sha: '', chunked: true,
+          name,
+          originalName: info.originalName || unwrapName(name),
+          size: info.totalSize, sha: '', chunked: true,
           parts: info.totalChunks, uploadedAt: info.uploadedAt || null,
         }));
       const chunkedNames = new Set(chunked.map(f => f.name));
       const cleanRegular = regular
         .filter(f => !chunkedNames.has(f.name))
-        .map(f => ({ ...f, uploadedAt: idx[f.name]?.uploadedAt || null, chunked: false }));
+        .map(f => ({
+          ...f,
+          originalName: idx[f.name]?.originalName || unwrapName(f.name),
+          uploadedAt: idx[f.name]?.uploadedAt || null,
+          chunked: false,
+        }));
       const all = [...cleanRegular, ...chunked].sort((a, b) => {
         if (!a.uploadedAt && !b.uploadedAt) return 0;
         if (!a.uploadedAt) return 1;
@@ -646,7 +677,7 @@ async function _handleRequest({ request, env, params }) {
       }
       try {
         const { data: idx, sha: idxSha } = await readIndex(fullSess);
-        idx[safe] = { uploadedAt: new Date().toISOString(), size: decodedSize };
+        idx[safe] = { originalName: getOriginalName(rawName, safe), uploadedAt: new Date().toISOString(), size: decodedSize };
         await writeIndex(fullSess, idx, idxSha);
       } catch {}
       return jsonRes(request, { ok:true, name:safe, size:decodedSize });
@@ -696,7 +727,7 @@ async function _handleRequest({ request, env, params }) {
     try {
       await finalizeChunkedUpload(fullSess, safe, blobs, totalSize, chunkSize);
       const { data: idx, sha: idxSha } = await readIndex(fullSess);
-      idx[safe] = { totalSize, totalChunks, uploadedAt: new Date().toISOString() };
+      idx[safe] = { originalName: getOriginalName(name, safe), totalSize, totalChunks, uploadedAt: new Date().toISOString() };
       await writeIndex(fullSess, idx, idxSha);
       return jsonRes(request, { ok:true, name:safe });
     } catch { return fail(request, 502); }
@@ -707,9 +738,13 @@ async function _handleRequest({ request, env, params }) {
     if (!safe) return fail(request,400);
     const { ghToken, ghOwner, ghRepo, ghBranch, folder } = fullSess;
     let manifest = null;
+    let serveAs  = safe; // filename sent to browser — overridden by index below
     try {
       const { data: idx } = await readIndex(fullSess);
-      if (idx[safe]) {
+      // Use stored originalName if present, otherwise fall back to unwrap heuristic
+      if (idx[safe]) serveAs = idx[safe].originalName || unwrapName(safe);
+      else serveAs = unwrapName(safe);
+      if (idx[safe]?.totalChunks) {
         const mUrl = `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents/${manifestP(folder,safe)}?ref=${ghBranch}`;
         const mRes = await fetch(mUrl, { headers: ghH(ghToken) });
         if (mRes.ok) {
@@ -745,8 +780,8 @@ async function _handleRequest({ request, env, params }) {
         status: 200,
         headers: {
           ...SEC, ...corsHeaders(request),
-          'Content-Type':        safeMime(safe),
-          'Content-Disposition': contentDisposition(safe),
+          'Content-Type':        safeMime(serveAs),
+          'Content-Disposition': contentDisposition(serveAs),
           'Content-Length':      String(manifest.totalSize),
           'Accept-Ranges':       'none',
         },
@@ -763,8 +798,8 @@ async function _handleRequest({ request, env, params }) {
       status:200,
       headers: {
         ...SEC, ...corsHeaders(request),
-        'Content-Type':        safeMime(safe),
-        'Content-Disposition': contentDisposition(safe),
+        'Content-Type':        safeMime(serveAs),
+        'Content-Disposition': contentDisposition(serveAs),
         ...(len?{'Content-Length':len}:{}),
         'Accept-Ranges': 'bytes',
       },
