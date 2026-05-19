@@ -75,6 +75,19 @@ on('clear-queue-btn',    'click',  () => clearQueue());
 on('refresh-files-btn',  'click',  () => loadFiles());
 on('fd-overlay',         'click',  e  => { if (e.target === e.currentTarget) closeFileDetail(); });
 on('fd-close-btn',       'click',  () => closeFileDetail());
+function showModal(title, msg, confirmLabel, confirmClass, onConfirm) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-msg').textContent = msg;
+  const overlay = document.getElementById('modal-overlay');
+  const confirmBtn = document.getElementById('modal-confirm-btn');
+  confirmBtn.textContent = confirmLabel;
+  confirmBtn.className = 'btn ' + confirmClass;
+  overlay.classList.add('open');
+  const close = () => overlay.classList.remove('open');
+  confirmBtn.onclick = () => { close(); onConfirm(); };
+  document.getElementById('modal-cancel-btn').onclick = close;
+  overlay.onclick = e => { if (e.target === overlay) close(); };
+}
 async function doLogin() {
   if (loginLocked) return;
   const username = document.getElementById('login-username').value.trim();
@@ -130,9 +143,10 @@ async function loadMeta() {
   } catch {}
 }
 async function doLogout() {
-  if (!confirm('Sign out of StoreGit?')) return;
-  try { await fetch('/api/logout',{method:'POST',credentials:'same-origin'}); } catch {}
-  uploadPending=[]; clearQueue(); showScreen('login');
+  showModal('Sign out', 'You will be signed out of StoreGit.', 'Sign Out', 'btn-ghost', async () => {
+    try { await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
+    uploadPending = []; clearQueue(); showScreen('login');
+  });
 }
 function goToStep(n) {
   [1,2,3].forEach(i => {
@@ -197,7 +211,14 @@ async function loadFiles() {
 function renderFiles(files) {
   const el=document.getElementById('file-list');
   el.innerHTML='';
-  const visible=files.filter(f=>f.name!=='.storegit');
+  const visible=files
+    .filter(f=>f.name!=='.storegit')
+    .sort((a,b)=>{
+      if(!a.uploadedAt&&!b.uploadedAt)return 0;
+      if(!a.uploadedAt)return 1;
+      if(!b.uploadedAt)return -1;
+      return new Date(b.uploadedAt)-new Date(a.uploadedAt);
+    });
   if(!visible.length){el.appendChild(emptyState('No files uploaded yet.'));return;}
   for(const f of visible){
     const row  = elem('div','file-row');
@@ -215,15 +236,18 @@ function renderFiles(files) {
   }
 }
 async function deleteFile(name, sha, chunked) {
-  if (!confirm(`Permanently delete "${name}"?\n\nThis cannot be undone.`)) return;
-  try {
-    const body = chunked ? { name, chunked:true } : { name, sha };
-    const r=await fetch('/api/delete',{method:'DELETE',credentials:'same-origin',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    if(r.status===401){doLogout();return;}
-    if(r.ok){toast('File deleted.','ok');loadFiles();}
-    else toast('Delete failed.','error');
-  } catch{toast('Delete failed.','error');}
+  showModal('Delete file', `“${name}” will be permanently deleted and cannot be recovered.`, 'Delete', 'btn-danger', async () => {
+    try {
+      const body = chunked ? { name, chunked: true } : { name, sha };
+      const r = await fetch('/api/delete', {
+        method: 'DELETE', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (r.status === 401) { doLogout(); return; }
+      if (r.ok) { toast('File deleted.', 'ok'); loadFiles(); }
+      else toast('Delete failed.', 'error');
+    } catch { toast('Delete failed.', 'error'); }
+  });
 }
 async function downloadFile(name, size) {
   const bar=document.getElementById('dl-bar'), fill=document.getElementById('dl-fill'),
@@ -299,8 +323,36 @@ function renderQueue() {
     fill.id=`qfill-${i}`; bar.appendChild(fill);
     info.append(nm,sz,bar);
     const st=elem('span',`queue-status ${it.status}`); st.id=`qstat-${i}`; st.textContent=statusLabel(it.status);
-    item.append(badge,info,st); qEl.appendChild(item);
+    if (it.status === 'fail') {
+      const retry = elem('button', 'queue-retry-btn');
+      retry.textContent = 'Retry';
+      retry.onclick = () => retryItem(i);
+      item.append(badge, info, st, retry);
+    } else {
+      item.append(badge, info, st);
+    }
+    qEl.appendChild(item);
   });
+}
+async function retryItem(idx) {
+  if (uploadPending[idx]?.status !== 'fail') return;
+  const btn = document.getElementById('upload-btn');
+  btn.disabled = true; btn.textContent = 'Uploading…';
+  setQ(idx, 'go', 0);
+  try {
+    if (uploadPending[idx].file.size > CHUNK_THRESHOLD) {
+      await chunkedUpload(uploadPending[idx].file, idx);
+    } else {
+      await xhrUpload(uploadPending[idx].file, idx);
+    }
+    setQ(idx, 'ok', 100);
+    toast('File uploaded.', 'ok');
+    loadFiles();
+  } catch (e) {
+    setQ(idx, 'fail', 0);
+    toast(e.message, 'error');
+  }
+  btn.disabled = false; btn.textContent = 'Upload Files';
 }
 function clearQueue(){
   uploadPending=[];
