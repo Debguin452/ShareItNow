@@ -269,8 +269,15 @@ function onFilePicked(fileList) {
     if(f.size>MAX_FILE_SIZE){rejected.push(`"${f.name}" exceeds the size limit.`);continue;}
     const ext=f.name.split('.').pop()?.toLowerCase()||'';
     if(BLOCKED_EXTS.has(ext)){rejected.push(`"${f.name}" — file type not permitted.`);continue;}
-    if(!uploadPending.find(p=>p.file.name===f.name&&p.file.size===f.size)){
-      uploadPending.push({file:f,status:'wait'});
+    const duplicate = uploadPending.find(p =>
+      p.file.name === f.name &&
+      p.file.size === f.size &&
+      p.file.lastModified === f.lastModified
+    );
+    if (duplicate) {
+      toast(`"${f.name}" is already in the queue.`, 'error');
+    } else {
+      uploadPending.push({file: f, status: 'wait'});
       precacheSlices(f);
     }
   }
