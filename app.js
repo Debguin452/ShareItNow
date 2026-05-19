@@ -53,7 +53,6 @@ function showScreen(name) {
   if (name === 'app') document.getElementById('app-screen').classList.add('active');
   else { const el = document.getElementById(`${name}-screen`); if (el) el.classList.add('active'); }
 }
-// ── Null-safe event binder — prevents crash if index.html and app.js versions are mismatched ──
 function on(id, evt, fn) {
   const el = document.getElementById(id);
   if (!el) { console.warn('[StoreGit] missing element #' + id); return; }
@@ -61,8 +60,6 @@ function on(id, evt, fn) {
 }
 on('login-username',    'keydown', e => { if (e.key === 'Enter') document.getElementById('login-password')?.focus(); });
 on('login-password',    'keydown', e => { if (e.key === 'Enter') doLogin(); });
-
-// ── Wire all UI handlers (replaces inline onclick/oninput/onchange blocked by CSP) ──
 on('login-btn',          'click',  () => doLogin());
 on('goto-signup',        'click',  e  => { e.preventDefault(); showScreen('signup'); });
 on('s-password',         'input',  e  => updateStrength(e.target.value));
@@ -97,16 +94,15 @@ async function doLogin() {
     if (r.ok) {
       const d = await r.json();
       bootApp({ display: d.display || username, username });
-      return; // success — app screen takes over, leave button as-is
+      return;
     } else if (r.status === 429) {
       startLockout(15 * 60);
-      return; // startLockout owns the button state from here
+      return;
     } else {
       errEl.textContent = 'Incorrect username or password.';
       document.getElementById('login-password').focus();
     }
   } catch { errEl.textContent = 'Connection error. Please try again.'; }
-  // Only reached on wrong password or network error — restore the button
   btn.disabled = false; btn.textContent = 'Sign In';
 }
 function startLockout(secs) {
@@ -470,13 +466,10 @@ function toast(msg,type=''){
   el.className=`toast show${type?' '+type:''}`;
   clearTimeout(el._t); el._t=setTimeout(()=>{el.className='toast';},3500);
 }
-
-/* ── File detail sheet ── */
 const FD_IMG   = new Set(['jpg','jpeg','png','gif','webp','bmp','ico','tiff','tif','avif']);
 const FD_AUDIO = new Set(['mp3','wav','ogg','m4a','flac','aac','opus']);
 const FD_VIDEO = new Set(['mp4','webm','mov','m4v']);
 const FD_TEXT  = new Set(['txt','md','markdown','csv','json','log','ini','cfg','conf','yaml','yml','toml','nfo','diff','patch']);
-
 function openFileDetail(f) {
   document.getElementById('fd-icon').textContent = fileExt(f.name);
   document.getElementById('fd-name').textContent = f.name;
@@ -491,26 +484,19 @@ function openFileDetail(f) {
   document.getElementById('fd-overlay').classList.add('open');
   loadFilePreview(f);
 }
-
 function closeFileDetail() {
   document.getElementById('fd-overlay').classList.remove('open');
 }
-
 async function loadFilePreview(f) {
   const el  = document.getElementById('fd-preview');
   const ext = (f.name.split('.').pop() || '').toLowerCase();
-
   function noPreview(msg) {
-    // Fix: use DOM APIs instead of innerHTML so msg can never cause XSS.
-    // msg may contain '<br>' for line-breaks — handle that without trusting arbitrary HTML.
     const wrap = document.createElement('div');
     wrap.className = 'fd-preview-none';
     const icon = document.createElement('div');
     icon.className = 'fd-preview-none-icon';
-    // SVG is static and controlled — safe to set via innerHTML
     icon.innerHTML = '<svg viewBox="0 0 40 40" fill="none"><rect x="8" y="6" width="24" height="28" rx="3" stroke="currentColor" stroke-width="1.5"/><path d="M14 15h12M14 20h12M14 25h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
     const textEl = document.createElement('div');
-    // Split on literal '<br>' to preserve intended line breaks without allowing arbitrary HTML
     msg.split('<br>').forEach((line, i) => {
       if (i > 0) textEl.appendChild(document.createElement('br'));
       textEl.appendChild(document.createTextNode(line));
@@ -518,7 +504,6 @@ async function loadFilePreview(f) {
     wrap.append(icon, textEl);
     el.replaceChildren(wrap);
   }
-
   async function fetchAsDataURL() {
     const r = await fetch(`/api/download?name=${encodeURIComponent(f.name)}`, {
       credentials: 'same-origin'
@@ -532,7 +517,6 @@ async function loadFilePreview(f) {
       reader.readAsDataURL(blob);
     });
   }
-
   if (FD_IMG.has(ext)) {
     if (f.size > 8 * 1024 * 1024) { noPreview('Image too large to preview.<br>Download to view.'); return; }
     try {
@@ -541,7 +525,6 @@ async function loadFilePreview(f) {
     } catch { noPreview('Could not load image preview.'); }
     return;
   }
-
   if (FD_AUDIO.has(ext)) {
     if (f.size > 8 * 1024 * 1024) { noPreview('Audio file is large.<br>Download to listen.'); return; }
     try {
@@ -550,7 +533,6 @@ async function loadFilePreview(f) {
     } catch { noPreview('Could not load audio preview.'); }
     return;
   }
-
   if (FD_VIDEO.has(ext)) {
     if (f.size > 15 * 1024 * 1024) { noPreview('Video too large to preview here.<br>Download to watch.'); return; }
     try {
@@ -559,7 +541,6 @@ async function loadFilePreview(f) {
     } catch { noPreview('Could not load video preview.'); }
     return;
   }
-
   if (FD_TEXT.has(ext) || f.size <= 200 * 1024) {
     if (f.size > 500 * 1024) { noPreview('File too large to preview as text.<br>Download to open.'); return; }
     try {
@@ -577,6 +558,5 @@ async function loadFilePreview(f) {
     } catch { noPreview('Could not load text preview.'); }
     return;
   }
-
   noPreview('No preview available.<br>Download to open this file.');
 }
