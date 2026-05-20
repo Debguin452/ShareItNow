@@ -248,7 +248,7 @@ ${previewCss}
 }
 async function createShareToken(username, filename, repoIdx, ttlSeconds, size, displayName, secret) {
   const exp     = Date.now() + ttlSeconds * 1000;
-  const payload = b64urlEnc(ENC.encode(JSON.stringify({ username, filename, repoIdx, exp, size: size || 0, displayName: displayName || filename })));
+  const payload = b64urlEnc(ENC.encode(JSON.stringify({ u: username, f: filename, r: repoIdx, e: exp, s: size || 0, d: displayName || filename })));
   const sig     = await hmacSign(`share:${payload}`, secret);
   return `${payload}.${sig}`;
 }
@@ -259,7 +259,16 @@ async function verifyShareToken(token, secret) {
   const payload = token.slice(0, dot), sig = token.slice(dot + 1);
   if (!(await timingSafeEq(sig, await hmacSign(`share:${payload}`, secret)))) return null;
   try {
-    const data = JSON.parse(DEC.decode(b64urlDec(payload)));
+    const raw = JSON.parse(DEC.decode(b64urlDec(payload)));
+    // Support both short keys (new) and long keys (legacy tokens)
+    const data = {
+      username:    raw.u ?? raw.username,
+      filename:    raw.f ?? raw.filename,
+      repoIdx:     raw.r ?? raw.repoIdx,
+      exp:         raw.e ?? raw.exp,
+      size:        raw.s ?? raw.size ?? 0,
+      displayName: raw.d ?? raw.displayName,
+    };
     if (Date.now() > data.exp) return null;
     return data;
   } catch { return null; }
@@ -681,17 +690,21 @@ async function _handleRequest({ request, env, params }) {
   // Short-link resolver: /api/s/{id}
   if (route.startsWith('s/') && method === 'GET') {
     const shortId = route.slice(2);
-    if (!shortId || !/^[0-9a-zA-Z]{6}$/.test(shortId)) return fail(request, 404);
+    if (!shortId || !/^[0-9a-zA-Z]{8}$/.test(shortId)) return fail(request, 404);
     const kv2 = env.RATE_LIMIT_KV || null;
-    const tok = kv2 ? await kv2.get('share_short:' + shortId).catch(() => null) : null;
+    const tok = kv2 ? await kv2.get('sl:' + shortId).catch(() => null) : null;
     if (!tok) {
       const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Link Expired</title><style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f4f4f6}.card{background:#fff;border-radius:14px;padding:2rem;text-align:center;max-width:320px;box-shadow:0 4px 24px rgba(0,0,0,.08)}h2{margin-bottom:.5rem}p{font-size:.85rem;color:#888}</style></head><body><div class="card"><h2>Link expired</h2><p>This share link has expired or is invalid.</p></div></body></html>';
       return new Response(html, { status:410, headers:{'Content-Type':'text/html;charset=utf-8','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Cache-Control':'no-store'} });
     }
+    // Serve directly without redirecting so the long token never appears in the browser URL
     const isDownload = new URL(request.url).searchParams.get('download') === '1';
-    const redirectBase = new URL(request.url).origin;
-    const newUrl = redirectBase + '/api/dl?tok=' + encodeURIComponent(tok) + (isDownload ? '&download=1' : '');
-    return Response.redirect(newUrl, 302);
+    const fakeReq = new Request(
+      new URL(request.url).origin + '/api/dl?tok=' + encodeURIComponent(tok) + (isDownload ? '&download=1' : ''),
+      { method: 'GET', headers: request.headers }
+    );
+    const fakeParams = { path: ['dl'] };
+    return _handleRequest({ request: fakeReq, env, params: fakeParams });
   }
   if (route === 'dl' && method === 'GET') {
     const sp       = new URL(request.url).searchParams;
@@ -875,14 +888,15 @@ async function _dispatchRoute(route, method, request, env, fullSess, sess, secre
     } catch {}
     const exp = new Date(Date.now() + ttl * 1000).toISOString();
     const tok = await createShareToken(sess.username, safe, fullSess.activeRepoIdx, ttl, size, displayName, secret);
-    // Generate a short ID in KV; fall back to long token URL if KV unavailable
+    // Use 8-char short link via KV if available, else fall back to full token URL
     const kv2 = env.RATE_LIMIT_KV || null;
     let url = `/api/dl?tok=${encodeURIComponent(tok)}`;
     if (kv2) {
-      const shortId = Array.from(crypto.getRandomValues(new Uint8Array(6)))
-        .map(b => '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'[b % 62]).join('');
-      await kv2.put('share_short:' + shortId, tok, { expirationTtl: ttl }).catch(() => {});
-      url = '/api/s/' + shortId;
+      const chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const shortId = Array.from(crypto.getRandomValues(new Uint8Array(8)))
+        .map(b => chars[b % 62]).join('');
+      await kv2.put('sl:' + shortId, tok, { expirationTtl: ttl }).catch(() => {});
+      url = `/api/s/${shortId}`;
     }
     return jsonRes(request, { url, exp });
   }
