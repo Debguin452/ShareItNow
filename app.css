@@ -363,3 +363,62 @@ body {
   .queue-retry-btn { border-color: #c0392b; color: #ff6b6b; }
   .queue-retry-btn:hover { background: #c0392b; color: #fff; }
 }
+
+/* ── Share modal ── */
+.share-modal { max-width: 360px; }
+.share-file-name { font-size: .82rem; font-weight: 600; color: #111; margin-bottom: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-ttl-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: .85rem; gap: .5rem; }
+.share-ttl-label { font-size: .73rem; color: #666; white-space: nowrap; }
+.share-ttl-opts { display: flex; gap: .35rem; }
+.ttl-opt { font-size: .72rem; font-weight: 600; padding: .28rem .65rem; border-radius: 20px; border: 1.5px solid #e2e2e6; background: transparent; color: #555; cursor: pointer; font-family: inherit; transition: border-color .12s, background .12s, color .12s; -webkit-tap-highlight-color: transparent; }
+.ttl-opt.active { border-color: #1a1a1a; background: #1a1a1a; color: #fff; }
+.share-link-row { display: flex; gap: .4rem; margin-bottom: .5rem; }
+.share-link-input { flex: 1; min-width: 0; padding: .55rem .75rem; border: 1.5px solid #e2e2e6; border-radius: 7px; font-size: .78rem; font-family: 'SF Mono','Fira Code',ui-monospace,monospace; color: #333; background: #f8f8fa; outline: none; -webkit-appearance: none; }
+.share-copy-btn { flex-shrink: 0; padding: .55rem .9rem; border-radius: 7px; border: none; background: #1a1a1a; color: #fff; font-size: .78rem; font-weight: 600; font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: opacity .12s; }
+.share-copy-btn:active { opacity: .75; }
+.share-exp { font-size: .72rem; color: #999; margin-bottom: .5rem; }
+.share-spinner { display: none; align-items: center; justify-content: center; padding: 1.5rem 0; }
+
+/* ── Outline button (share) ── */
+.btn-outline { background: transparent; border: 1.5px solid #e2e2e6; color: #444; }
+.btn-outline:hover { background: #f4f4f6; }
+
+/* ── Repo chip (topbar) ── */
+.repo-chip { display: none; font-size: .7rem; font-weight: 600; color: #555; padding: .28rem .6rem; background: #f0f0f2; border-radius: 20px; border: none; cursor: pointer; font-family: inherit; white-space: nowrap; max-width: 120px; overflow: hidden; text-overflow: ellipsis; -webkit-tap-highlight-color: transparent; transition: background .12s; }
+.repo-chip:hover { background: #e4e4e8; }
+
+/* ── Repo switcher in modal ── */
+.repo-switcher { display: flex; flex-direction: column; gap: .35rem; }
+.repo-opt { padding: .65rem .8rem; border-radius: 8px; background: #f4f4f6; cursor: pointer; font-size: .83rem; font-weight: 500; color: #111; transition: background .1s; border: 1.5px solid transparent; }
+.repo-opt.active { border-color: #1a1a1a; }
+.repo-opt:hover { background: #eaeaee; }
+.repo-opt-sub { font-size: .7rem; color: #888; font-weight: 400; margin-top: 2px; }
+
+/* ── Queue paused state ── */
+.queue-status.paused { color: #888; }
+
+/* ── Reset password screen ── */
+#reset-screen .auth-card { max-width: 380px; }
+
+/* ── fd-actions three-button layout ── */
+.fd-actions { display: flex; gap: .5rem; }
+.fd-actions .btn { flex: 1; margin: 0; padding: .72rem .5rem; font-size: .82rem; }
+
+@media (prefers-color-scheme: dark) {
+  .share-file-name { color: #f0f0f0; }
+  .share-ttl-label { color: #888; }
+  .ttl-opt { border-color: #3a3a3e; color: #bbb; background: transparent; }
+  .ttl-opt.active { border-color: #f0f0f0; background: #f0f0f0; color: #111; }
+  .share-link-input { border-color: #3a3a3e; background: #28282c; color: #e0e0e0; }
+  .share-copy-btn { background: #f0f0f0; color: #111; }
+  .btn-outline { border-color: #3a3a3e; color: #bbb; }
+  .btn-outline:hover { background: #28282c; }
+  .repo-chip { background: #28282c; color: #bbb; }
+  .repo-chip:hover { background: #323236; }
+  .repo-opt { background: #28282c; color: #f0f0f0; }
+  .repo-opt:hover { background: #323236; }
+  .repo-opt.active { border-color: #f0f0f0; }
+  .repo-opt-sub { color: #666; }
+  .queue-status.paused { color: #666; }
+  .share-exp { color: #666; }
+}

@@ -2,9 +2,13 @@
 const CHUNK_THRESHOLD = 5  * 1024 * 1024;
 const CHUNK_SIZE      = 10 * 1024 * 1024;
 const MAX_FILE_SIZE   = 5  * 1024 * 1024 * 1024;
-let loginLocked   = false;
-let uploadPending = [];
-let _signupData   = {};
+let loginLocked      = false;
+let uploadPending    = [];
+let _signupData      = {};
+let _uploadActive    = false;
+let _uploadPaused    = false;
+let _uploadAbortFn   = null;
+let _shareFile       = null;
 const _sliceCache = new WeakMap();
 function precacheSlices(file) {
   if (file.size <= CHUNK_THRESHOLD) return;
@@ -62,6 +66,26 @@ on('upload-btn',         'click',  () => startUpload());
 on('clear-queue-btn',    'click',  () => clearQueue());
 on('refresh-files-btn',  'click',  () => loadFiles());
 on('fd-overlay',         'click',  e  => { if (e.target === e.currentTarget) closeFileDetail(); });
+on('pause-btn',          'click',  () => togglePause());
+on('fd-share-btn',       'click',  () => _shareFile && shareFile(_shareFile));
+on('share-done-btn',     'click',  () => closeShareModal());
+on('share-copy-btn',     'click',  () => copyShareLink());
+on('goto-reset',         'click',  e  => { e.preventDefault(); showScreen('reset'); });
+on('reset-back',         'click',  e  => { e.preventDefault(); showScreen('login'); });
+on('reset-btn',          'click',  () => doReset());
+document.addEventListener('paste', e => {
+  const items = e.clipboardData?.items || [];
+  const files = [];
+  for (const item of items) { if (item.kind === 'file') { const f = item.getAsFile(); if (f) files.push(f); } }
+  if (files.length) onFilePicked(files);
+});
+document.getElementById('share-ttl-opts')?.addEventListener('click', e => {
+  const btn = e.target.closest('.ttl-opt');
+  if (!btn) return;
+  document.querySelectorAll('.ttl-opt').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (_shareFile) shareFile(_shareFile);
+});
 on('fd-close-btn',       'click',  () => closeFileDetail());
 function showModal(title, msg, confirmLabel, confirmClass, onConfirm) {
   document.getElementById('modal-title').textContent = title;
@@ -124,10 +148,42 @@ function bootApp(me) {
   chip.title = me.display || me.username;
   showScreen('app'); loadMeta(); loadFiles();
 }
+function updateRepoChip(repos, activeIdx) {
+  const chip = document.getElementById('repo-chip');
+  if (!chip) return;
+  if (!repos || repos.length <= 1) { chip.style.display = 'none'; return; }
+  chip.style.display = 'flex';
+  chip.textContent = repos[activeIdx]?.label || 'Repo';
+  chip.onclick = () => showRepoSwitcher(repos, activeIdx);
+}
+function showRepoSwitcher(repos, activeIdx) {
+  const opts = repos.map((r, i) =>
+    `<div class="repo-opt${i === activeIdx ? ' active' : ''}" data-idx="${i}">${r.label || r.ghRepo}<div class="repo-opt-sub">${r.ghOwner}/${r.ghRepo}</div></div>`
+  ).join('');
+  showModal('Switch Repository', '', '', '', () => {});
+  document.getElementById('modal-msg').innerHTML = `<div class="repo-switcher">${opts}</div>`;
+  document.getElementById('modal-confirm-btn').style.display = 'none';
+  document.getElementById('modal-cancel-btn').textContent = 'Cancel';
+  document.querySelectorAll('.repo-opt').forEach(el => {
+    el.addEventListener('click', async () => {
+      const idx = parseInt(el.dataset.idx, 10);
+      if (idx === activeIdx) { document.getElementById('modal-overlay').classList.remove('open'); return; }
+      document.getElementById('modal-overlay').classList.remove('open');
+      try {
+        const r = await fetch('/api/switch-repo', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ repoIdx: idx }) });
+        if (r.ok) { loadMeta(); loadFiles(); }
+      } catch {}
+    });
+  });
+}
 async function loadMeta() {
   try {
     const r = await fetch('/api/me', { credentials:'same-origin' });
-    if (r.ok) { const d = await r.json(); document.getElementById('repo-label').textContent = d.repo||''; }
+    if (r.ok) {
+      const d = await r.json();
+      document.getElementById('repo-label').textContent = d.repoLabel ? `${d.repoLabel} — ${d.repo}` : (d.repo || '');
+      updateRepoChip(d.repos, d.activeRepoIdx ?? 0);
+    }
   } catch {}
 }
 async function doLogout() {
@@ -301,6 +357,10 @@ function renderQueue() {
   const qEl=document.getElementById('upload-queue'), aEl=document.getElementById('upload-actions');
   if(!uploadPending.length){qEl.style.display='none';aEl.style.display='none';return;}
   qEl.style.display='block'; aEl.style.display='flex'; qEl.innerHTML='';
+  const pauseBtn=document.getElementById('pause-btn');
+  const upBtn=document.getElementById('upload-btn');
+  if(pauseBtn) { pauseBtn.style.display=_uploadActive?'':'none'; pauseBtn.textContent=_uploadPaused?'Resume':'Pause'; }
+  if(upBtn) { upBtn.style.display=_uploadActive&&!_uploadPaused?'none':''; }
   uploadPending.forEach((it,i)=>{
     const item=elem('div','queue-item');
     const badge=elem('div','queue-file-icon'); badge.textContent=fileExt(it.file.name);
@@ -312,10 +372,10 @@ function renderQueue() {
     fill.id=`qfill-${i}`; bar.appendChild(fill);
     info.append(nm,sz,bar);
     const st=elem('span',`queue-status ${it.status}`); st.id=`qstat-${i}`; st.textContent=statusLabel(it.status);
-    if (it.status === 'fail') {
+    if (it.status === 'fail' || it.status === 'paused') {
       const retry = elem('button', 'queue-retry-btn');
-      retry.textContent = 'Retry';
-      retry.onclick = () => retryItem(i);
+      retry.textContent = it.status === 'paused' ? 'Resume' : 'Retry';
+      retry.onclick = () => { if (it.status === 'paused') { it.status = 'wait'; renderQueue(); startUpload(); } else retryItem(i); };
       item.append(badge, info, st, retry);
     } else {
       item.append(badge, info, st);
@@ -324,7 +384,8 @@ function renderQueue() {
   });
 }
 async function retryItem(idx) {
-  if (uploadPending[idx]?.status !== 'fail') return;
+  const st = uploadPending[idx]?.status;
+  if (st !== 'fail' && st !== 'paused') return;
   const btn = document.getElementById('upload-btn');
   btn.disabled = true; btn.textContent = 'Uploading…';
   setQ(idx, 'go', 0);
@@ -348,27 +409,53 @@ function clearQueue(){
   document.getElementById('file-input').value='';
   renderQueue();
 }
-async function startUpload() {
-  if(!uploadPending.length) return;
-  const btn=document.getElementById('upload-btn');
-  btn.disabled=true; btn.textContent='Uploading…';
-  for(let i=0;i<uploadPending.length;i++){
-    if(uploadPending[i].status==='ok') continue;
-    setQ(i,'go',0);
-    try{
-      if(uploadPending[i].file.size > CHUNK_THRESHOLD){
-        await chunkedUpload(uploadPending[i].file, i);
-      } else {
-        await xhrUpload(uploadPending[i].file, i);
-      }
-      setQ(i,'ok',100);
-    } catch(e){ setQ(i,'fail',0); toast(e.message,'error'); }
+function togglePause() {
+  if (!_uploadActive) return;
+  if (_uploadPaused) {
+    _uploadPaused = false;
+    renderQueue();
+    if (_uploadAbortFn) { const fn = _uploadAbortFn; _uploadAbortFn = null; fn(); }
+  } else {
+    _uploadPaused = true;
+    if (_uploadAbortFn) { _uploadAbortFn(); _uploadAbortFn = null; }
+    renderQueue();
+    toast('Upload paused.', '');
   }
-  btn.disabled=false; btn.textContent='Upload Files';
-  const failed=uploadPending.filter(p=>p.status==='fail').length;
-  if(!failed){toast('All files uploaded.','ok');clearQueue();}
-  else toast(`${failed} file${failed>1?'s':''} failed.`,'error');
-  loadFiles();
+}
+async function startUpload() {
+  if (_uploadActive) return;
+  if (!uploadPending.length) return;
+  _uploadActive = true;
+  _uploadPaused = false;
+  renderQueue();
+  for (let i = 0; i < uploadPending.length; i++) {
+    const it = uploadPending[i];
+    if (it.status === 'ok') continue;
+    if (_uploadPaused) { setQ(i, 'wait', 0); continue; }
+    setQ(i, 'go', 0);
+    try {
+      if (it.file.size > CHUNK_THRESHOLD) {
+        await chunkedUpload(it.file, i);
+      } else {
+        await xhrUpload(it.file, i);
+      }
+      if (it.status !== 'paused') setQ(i, 'ok', 100);
+    } catch(e) {
+      if (e.message !== '__paused__') { setQ(i, 'fail', 0); toast(e.message, 'error'); }
+    }
+  }
+  _uploadActive = false;
+  _uploadAbortFn = null;
+  renderQueue();
+  const failed = uploadPending.filter(p => p.status === 'fail').length;
+  const paused = uploadPending.filter(p => p.status === 'paused' || p.status === 'wait').length;
+  if (!_uploadPaused && !paused) {
+    if (!failed) { toast('All files uploaded.', 'ok'); clearQueue(); }
+    else toast(`${failed} file${failed > 1 ? 's' : ''} failed.`, 'error');
+    loadFiles();
+  } else if (!paused) {
+    loadFiles();
+  }
 }
 function blobToBase64(blob) {
   return new Promise((res, rej) => {
@@ -381,9 +468,11 @@ function blobToBase64(blob) {
 async function xhrUpload(file, idx) {
   setQ(idx, 'go', 5);
   const b64 = await blobToBase64(file);
+  if (_uploadPaused) { setQ(idx, 'paused', 30); throw new Error('__paused__'); }
   setQ(idx, 'go', 30);
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    _uploadAbortFn = () => { xhr.abort(); setQ(idx, 'paused', 30); reject(new Error('__paused__')); };
     xhr.open('POST', '/api/upload');
     xhr.withCredentials = true;
     xhr.setRequestHeader('Content-Type', 'application/json');
@@ -391,13 +480,14 @@ async function xhrUpload(file, idx) {
       if (e.lengthComputable) setQ(idx, 'go', 30 + Math.round(e.loaded / e.total * 65));
     };
     xhr.onload = () => {
+      _uploadAbortFn = null;
       if (xhr.status === 200) { resolve(); return; }
       if (xhr.status === 401) { doLogout(); reject(new Error('Session expired.')); return; }
       let msg = 'Upload failed.'; try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
       reject(new Error(msg));
     };
-    xhr.onerror   = () => reject(new Error('Network error.'));
-    xhr.ontimeout = () => reject(new Error('Upload timed out.'));
+    xhr.onerror   = () => { _uploadAbortFn = null; reject(new Error('Network error.')); };
+    xhr.ontimeout = () => { _uploadAbortFn = null; reject(new Error('Upload timed out.')); };
     xhr.timeout   = 10 * 60 * 1000;
     xhr.send(JSON.stringify({ name: file.name, content: b64 }));
   });
@@ -418,6 +508,12 @@ async function chunkedUpload(file, idx) {
   const indexQueue = Array.from({ length: totalChunks }, (_, i) => i);
   const runWorker = async () => {
     while (indexQueue.length > 0) {
+      if (_uploadPaused) {
+        const remaining = indexQueue.splice(0);
+        indexQueue.push(...remaining);
+        setQ(idx, 'paused', 18 + Math.round((doneCount / totalChunks) * 74));
+        throw new Error('__paused__');
+      }
       const i = indexQueue.shift();
       const result = await xhrChunkWithRetry(
         encoded[i], slices[i].size, file.name, i, totalChunks, idx
@@ -467,19 +563,21 @@ async function xhrChunkWithRetry(b64, rawSize, name, chunkIndex, totalChunks, qu
 async function xhrChunkEncoded(b64, rawSize, name, chunkIndex, totalChunks, queueIdx) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    _uploadAbortFn = () => { xhr.abort(); reject(new Error('__paused__')); };
     xhr.open('POST', '/api/upload-chunk');
     xhr.withCredentials = true;
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.timeout   = 5 * 60 * 1000;
     xhr.onload = () => {
+      _uploadAbortFn = null;
       if (xhr.status === 200) { resolve(JSON.parse(xhr.responseText)); return; }
       if (xhr.status === 401) { doLogout(); reject(new Error('Session expired.')); return; }
       let msg = `Upload error on segment ${chunkIndex + 1}.`;
       try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
       reject(new Error(msg));
     };
-    xhr.onerror   = () => reject(new Error(`Network error.`));
-    xhr.ontimeout = () => reject(new Error(`Upload segment timed out.`));
+    xhr.onerror   = () => { _uploadAbortFn = null; reject(new Error('Network error.')); };
+    xhr.ontimeout = () => { _uploadAbortFn = null; reject(new Error('Upload segment timed out.')); };
     xhr.send(JSON.stringify({ name, chunkIndex, totalChunks, content: b64 }));
   });
 }
@@ -493,7 +591,7 @@ function setQ(i, status, pct) {
     if (status === 'go') { fill.classList.add('wave'); } else { fill.classList.remove('wave'); }
   }
 }
-function statusLabel(s){return{wait:'Ready',go:'Uploading…',ok:'Done',fail:'Failed'}[s]||s;}
+function statusLabel(s){return{wait:'Ready',go:'Uploading…',ok:'Done',fail:'Failed',paused:'Paused'}[s]||s;}
 function fmtSize(b){
   if(b==null||isNaN(b))return'—';
   if(b<1024)return`${b} B`;
@@ -519,6 +617,7 @@ const FD_AUDIO = new Set(['mp3','wav','ogg','m4a','flac','aac','opus']);
 const FD_VIDEO = new Set(['mp4','webm','mov','m4v']);
 const FD_TEXT  = new Set(['txt','md','markdown','csv','json','log','ini','cfg','conf','yaml','yml','toml','nfo','diff','patch']);
 function openFileDetail(f) {
+  _shareFile = f;
   const displayName = f.originalName || f.name;
   document.getElementById('fd-icon').textContent = fileExt(displayName);
   document.getElementById('fd-name').textContent = displayName;
@@ -535,6 +634,7 @@ function openFileDetail(f) {
 }
 function closeFileDetail() {
   document.getElementById('fd-overlay').classList.remove('open');
+  _shareFile = null;
 }
 async function loadFilePreview(f) {
   const el  = document.getElementById('fd-preview');
@@ -609,4 +709,75 @@ async function loadFilePreview(f) {
     return;
   }
   noPreview('No preview available.<br>Download to open this file.');
+}
+
+async function shareFile(f) {
+  const overlay = document.getElementById('share-overlay');
+  const body    = document.getElementById('share-body');
+  const spinner = document.getElementById('share-spinner');
+  const input   = document.getElementById('share-link-input');
+  const expEl   = document.getElementById('share-exp');
+  document.getElementById('share-file-name').textContent = f.originalName || f.name;
+  body.style.display = 'none';
+  spinner.style.display = 'flex';
+  overlay.classList.add('open');
+  const ttl = parseInt(document.querySelector('.ttl-opt.active')?.dataset.ttl || '3600', 10);
+  try {
+    const r = await fetch(`/api/share-link?name=${encodeURIComponent(f.name)}&ttl=${ttl}`, { credentials: 'same-origin' });
+    if (r.status === 401) { doLogout(); return; }
+    if (!r.ok) { toast('Could not generate share link.', 'error'); closeShareModal(); return; }
+    const d = await r.json();
+    const fullUrl = window.location.origin + d.url;
+    input.value = fullUrl;
+    const exp = new Date(d.exp);
+    expEl.textContent = `Expires ${exp.toLocaleString()}`;
+    body.style.display = '';
+    spinner.style.display = 'none';
+  } catch {
+    toast('Could not generate share link.', 'error');
+    closeShareModal();
+  }
+}
+function closeShareModal() {
+  document.getElementById('share-overlay').classList.remove('open');
+  document.getElementById('share-body').style.display = 'none';
+  document.getElementById('share-spinner').style.display = 'none';
+  document.getElementById('share-link-input').value = '';
+}
+function copyShareLink() {
+  const val = document.getElementById('share-link-input').value;
+  if (!val) return;
+  navigator.clipboard.writeText(val).then(() => toast('Link copied!', 'ok')).catch(() => {
+    document.getElementById('share-link-input').select();
+    document.execCommand('copy');
+    toast('Link copied!', 'ok');
+  });
+}
+async function doReset() {
+  const username    = document.getElementById('r-username').value.trim();
+  const ghToken     = document.getElementById('r-gh-token').value.trim();
+  const newPassword = document.getElementById('r-new-password').value;
+  const errEl       = document.getElementById('reset-error');
+  const btn         = document.getElementById('reset-btn');
+  errEl.textContent = '';
+  if (!username || !ghToken || !newPassword) { errEl.textContent = 'Please fill in all fields.'; return; }
+  if (newPassword.length < 8) { errEl.textContent = 'Password must be at least 8 characters.'; return; }
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  try {
+    const r = await fetch('/api/reset-password', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, ghToken, newPassword }),
+    });
+    document.getElementById('r-new-password').value = '';
+    document.getElementById('r-gh-token').value = '';
+    if (r.ok) {
+      toast('Password reset successfully. Sign in with your new password.', 'ok');
+      showScreen('login');
+    } else {
+      const d = await r.json().catch(() => ({}));
+      errEl.textContent = d.error || 'Reset failed. Check your username and token.';
+    }
+  } catch { errEl.textContent = 'Connection error. Please try again.'; }
+  btn.disabled = false; btn.textContent = 'Reset Password';
 }
