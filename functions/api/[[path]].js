@@ -170,11 +170,81 @@ function contentDisposition(safeName) {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(safeName)}`;
 }
 function buildSharePage(filename, displayName, size, expIso, tok) {
-  const ext  = (displayName.split('.').pop() || 'FILE').slice(0,5).toUpperCase();
+  const extRaw = (displayName.split('.').pop() || '').toLowerCase();
+  const extLabel = extRaw.slice(0,5).toUpperCase() || 'FILE';
   const sz   = size > 0 ? (size < 1048576 ? (size/1024).toFixed(1)+' KB' : size < 1073741824 ? (size/1048576).toFixed(1)+' MB' : (size/1073741824).toFixed(2)+' GB') : '';
   const exp  = expIso ? new Date(expIso).toLocaleString('en-US', { dateStyle:'medium', timeStyle:'short' }) : '';
   const dlUrl = `?tok=${encodeURIComponent(tok)}&download=1`;
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${displayName.replace(/</g,'&lt;')} — StoreGit</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#f4f4f6;color:#111;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1.5rem}.card{background:#fff;border-radius:16px;padding:2rem 1.75rem;width:100%;max-width:360px;box-shadow:0 1px 4px rgba(0,0,0,.06),0 8px 28px rgba(0,0,0,.08);text-align:center}.brand{font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#999;margin-bottom:1.5rem}.file-icon{width:56px;height:56px;background:#f0f0f2;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:.62rem;font-weight:700;letter-spacing:.04em;color:#555;margin:0 auto .9rem}.file-name{font-size:1rem;font-weight:600;color:#111;word-break:break-all;line-height:1.4;margin-bottom:.3rem}.file-size{font-size:.8rem;color:#999;margin-bottom:.5rem}.file-exp{font-size:.72rem;color:#bbb;margin-bottom:1.5rem}.dl-btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;width:100%;padding:.82rem 1.2rem;background:#1a1a1a;color:#fff;border:none;border-radius:10px;font-family:inherit;font-size:.9rem;font-weight:600;text-decoration:none;transition:opacity .15s;cursor:pointer}.dl-btn:active{opacity:.75}.footer{margin-top:1.25rem;font-size:.72rem;color:#ccc}@media(prefers-color-scheme:dark){body{background:#0d0d0f}.card{background:#1c1c1f;box-shadow:0 1px 4px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.5)}.brand{color:#555}.file-icon{background:#28282c;color:#aaa}.file-name{color:#f0f0f0}.file-size{color:#666}.file-exp{color:#444}.dl-btn{background:#f0f0f0;color:#111}.footer{color:#444}}</style></head><body><div class="card"><div class="brand">StoreGit</div><div class="file-icon">${ext}</div><div class="file-name">${displayName.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>${sz?`<div class="file-size">${sz}</div>`:''}<div class="file-exp">${exp ? 'Expires '+exp : ''}</div><a class="dl-btn" href="${dlUrl}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M12 5v14M5 12l7 7 7-7"/></svg>Download</a></div><div class="footer">Shared via StoreGit</div></body></html>`;
+  const IMGS  = new Set(['jpg','jpeg','png','gif','webp','bmp','avif','tiff','tif','ico']);
+  const VIDS  = new Set(['mp4','webm','mov','m4v']);
+  const TEXTS = new Set(['txt','md','markdown','csv','json','log','ini','cfg','conf','yaml','yml','toml','diff','patch','nfo','js','ts','jsx','tsx','py','rb','sh','bash','c','cpp','h','java','go','rs','swift','kt','php','css','html','htm','xml','sql','r','lua']);
+  const isImg  = IMGS.has(extRaw);
+  const isVid  = VIDS.has(extRaw);
+  const isText = TEXTS.has(extRaw);
+  const CODE_EXTS = new Set(['js','ts','jsx','tsx','py','rb','sh','bash','c','cpp','h','java','go','rs','swift','kt','php','css','html','htm','xml','sql','r','lua','json']);
+  const isCode = CODE_EXTS.has(extRaw);
+
+  // Preview block: image / video / code / text
+  const previewBlock = isImg
+    ? `<div class="preview-wrap"><img class="preview-img" src="${dlUrl}" alt="${displayName.replace(/"/g,'&quot;')}" loading="lazy" onerror="this.closest('.preview-wrap').style.display='none'"></div>`
+    : isVid
+    ? `<div class="preview-wrap"><video class="preview-vid" controls preload="metadata" src="${dlUrl}" onerror="this.closest('.preview-wrap').style.display='none'"></video></div>`
+    : isText
+    ? `<div class="preview-wrap text-wrap" id="tw"><div class="text-loading" id="tl"><span class="spin"></span> Loading preview…</div><pre class="code-pre" id="cp" style="display:none"></pre><div class="text-err" id="te" style="display:none">Could not load preview.</div></div><script>
+(function(){
+  var pre=document.getElementById('cp'),ld=document.getElementById('tl'),er=document.getElementById('te');
+  fetch(${JSON.stringify(dlUrl)}).then(function(r){if(!r.ok)throw 0;return r.text();}).then(function(t){
+    ld.style.display='none';
+    pre.textContent=t.length>8000?t.slice(0,8000)+'\\n\\n… (truncated)':t;
+    pre.style.display='';
+  }).catch(function(){ld.style.display='none';er.style.display='';});
+})();
+</script>`
+    : '';
+
+  const nameSafe = displayName.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const previewCss = (isImg || isVid) ? `
+.preview-wrap{width:100%;margin-bottom:1.25rem;border-radius:10px;overflow:hidden;background:#000;display:flex;align-items:center;justify-content:center;}
+.preview-img{max-width:100%;max-height:420px;object-fit:contain;display:block;margin:0 auto;}
+.preview-vid{width:100%;max-height:380px;display:block;}` : isText ? `
+.preview-wrap.text-wrap{background:#f7f7f9;border:1px solid #e8e8ec;border-radius:10px;overflow:hidden;margin-bottom:1.25rem;text-align:left;}
+.text-loading{padding:1rem;font-size:.8rem;color:#888;display:flex;align-items:center;gap:.5rem;}
+.spin{width:14px;height:14px;border:2px solid #ccc;border-top-color:#555;border-radius:50%;display:inline-block;animation:sp .7s linear infinite;flex-shrink:0;}
+@keyframes sp{to{transform:rotate(360deg)}}
+.text-err{padding:1rem;font-size:.8rem;color:#c0392b;}
+.code-pre{font-family:'SF Mono','Fira Mono','Consolas',monospace;font-size:.72rem;line-height:1.55;padding:1rem;overflow:auto;max-height:360px;white-space:pre;color:#1a1a1a;margin:0;}
+@media(prefers-color-scheme:dark){.preview-wrap.text-wrap{background:#1a1a1f;border-color:#2c2c34;}.code-pre{color:#e2e2e8;}.spin{border-color:#444;border-top-color:#aaa;}}` : '';
+
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${nameSafe} — StoreGit</title><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#f4f4f6;color:#111;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:${isImg||isVid||isText?'flex-start':'center'};padding:1.5rem;}
+.card{background:#fff;border-radius:16px;padding:2rem 1.75rem;width:100%;max-width:${isImg||isVid||isText?'640':'360'}px;box-shadow:0 1px 4px rgba(0,0,0,.06),0 8px 28px rgba(0,0,0,.08);${isImg||isVid||isText?'margin:1.5rem auto;':'text-align:center;'}}
+.brand{font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#999;margin-bottom:1.5rem;}
+.file-header{display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem;}
+.file-icon{width:42px;height:42px;min-width:42px;background:#f0f0f2;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:700;letter-spacing:.04em;color:#555;}
+.file-info{text-align:left;overflow:hidden;}
+.file-name{font-size:.95rem;font-weight:600;color:#111;word-break:break-all;line-height:1.35;}
+.file-meta{font-size:.75rem;color:#999;margin-top:.15rem;}
+.dl-btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;width:100%;padding:.82rem 1.2rem;background:#1a1a1a;color:#fff;border:none;border-radius:10px;font-family:inherit;font-size:.9rem;font-weight:600;text-decoration:none;transition:opacity .15s;cursor:pointer;}
+.dl-btn:active{opacity:.75}
+.footer{margin-top:1.25rem;font-size:.72rem;color:#ccc;text-align:center;}
+${previewCss}
+@media(prefers-color-scheme:dark){body{background:#0d0d0f}.card{background:#1c1c1f;box-shadow:0 1px 4px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.5)}.brand{color:#555}.file-icon{background:#28282c;color:#aaa}.file-name{color:#f0f0f0}.file-meta{color:#666}.dl-btn{background:#f0f0f0;color:#111}.footer{color:#444}}
+</style></head><body>
+<div class="card">
+  <div class="brand">StoreGit</div>
+  ${previewBlock}
+  <div class="file-header">
+    <div class="file-icon">${extLabel}</div>
+    <div class="file-info">
+      <div class="file-name">${nameSafe}</div>
+      <div class="file-meta">${[sz, exp ? 'Expires '+exp : ''].filter(Boolean).join(' · ')}</div>
+    </div>
+  </div>
+  <a class="dl-btn" href="${dlUrl}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M12 5v14M5 12l7 7 7-7"/></svg>Download</a>
+</div>
+<div class="footer">Shared via StoreGit</div>
+</body></html>`;
 }
 async function createShareToken(username, filename, repoIdx, ttlSeconds, size, displayName, secret) {
   const exp     = Date.now() + ttlSeconds * 1000;
@@ -608,6 +678,21 @@ async function _handleRequest({ request, env, params }) {
     }
     return jsonRes(request, { ok:true }, 200, { 'Set-Cookie': buildSetCookie(request, '', 0) });
   }
+  // Short-link resolver: /api/s/{id}
+  if (route.startsWith('s/') && method === 'GET') {
+    const shortId = route.slice(2);
+    if (!shortId || !/^[0-9a-zA-Z]{6}$/.test(shortId)) return fail(request, 404);
+    const kv2 = env.RATE_LIMIT_KV || null;
+    const tok = kv2 ? await kv2.get('share_short:' + shortId).catch(() => null) : null;
+    if (!tok) {
+      const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Link Expired</title><style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f4f4f6}.card{background:#fff;border-radius:14px;padding:2rem;text-align:center;max-width:320px;box-shadow:0 4px 24px rgba(0,0,0,.08)}h2{margin-bottom:.5rem}p{font-size:.85rem;color:#888}</style></head><body><div class="card"><h2>Link expired</h2><p>This share link has expired or is invalid.</p></div></body></html>';
+      return new Response(html, { status:410, headers:{'Content-Type':'text/html;charset=utf-8','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Cache-Control':'no-store'} });
+    }
+    const isDownload = new URL(request.url).searchParams.get('download') === '1';
+    const redirectBase = new URL(request.url).origin;
+    const newUrl = redirectBase + '/api/dl?tok=' + encodeURIComponent(tok) + (isDownload ? '&download=1' : '');
+    return Response.redirect(newUrl, 302);
+  }
   if (route === 'dl' && method === 'GET') {
     const sp       = new URL(request.url).searchParams;
     const tok      = sp.get('tok') || '';
@@ -622,7 +707,7 @@ async function _handleRequest({ request, env, params }) {
     }
     if (!isDownload && (request.headers.get('Accept') || '').includes('text/html')) {
       const page = buildSharePage(data.filename, data.displayName || data.filename, data.size || 0, new Date(data.exp).toISOString(), tok);
-      return new Response(page, { status:200, headers:{'Content-Type':'text/html;charset=utf-8','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none';"} });
+      return new Response(page, { status:200, headers:{'Content-Type':'text/html;charset=utf-8','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self'; media-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none';"} });
     }
     const rec = await getUser(data.username, env);
     if (!rec) return fail(request, 404);
@@ -790,7 +875,15 @@ async function _dispatchRoute(route, method, request, env, fullSess, sess, secre
     } catch {}
     const exp = new Date(Date.now() + ttl * 1000).toISOString();
     const tok = await createShareToken(sess.username, safe, fullSess.activeRepoIdx, ttl, size, displayName, secret);
-    const url = `/api/dl?tok=${encodeURIComponent(tok)}`;
+    // Generate a short ID in KV; fall back to long token URL if KV unavailable
+    const kv2 = env.RATE_LIMIT_KV || null;
+    let url = `/api/dl?tok=${encodeURIComponent(tok)}`;
+    if (kv2) {
+      const shortId = Array.from(crypto.getRandomValues(new Uint8Array(6)))
+        .map(b => '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'[b % 62]).join('');
+      await kv2.put('share_short:' + shortId, tok, { expirationTtl: ttl }).catch(() => {});
+      url = '/api/s/' + shortId;
+    }
     return jsonRes(request, { url, exp });
   }
   if (route === 'files' && method === 'GET') {
