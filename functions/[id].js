@@ -2,7 +2,12 @@
 const ID_RE = /^[A-Za-z0-9_\-]{1,5}$/;
 export async function onRequestGet({ env, params, request }) {
   const id = params.id;
-  if (!id || !ID_RE.test(id)) return Response.redirect(new URL(request.url).origin + '/', 302);
+  if (!id || !ID_RE.test(id)) {
+    // Pass through to static assets (app.css, app.js, images, etc.)
+    // instead of redirecting, so the browser can load them correctly.
+    if (env.ASSETS) return env.ASSETS.fetch(request);
+    return Response.redirect(new URL(request.url).origin + '/', 302);
+  }
   const kv = env.RATE_LIMIT_KV ?? null;
   if (!kv) return page(errorHTML('unavailable'), 503);
   let entry;
