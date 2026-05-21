@@ -121,7 +121,7 @@ async function doLogin() {
       bootApp({ display: d.display || username, username });
       return;
     } else if (r.status === 429) {
-      startLockout(15 * 60);
+      startLockout(30);
       return;
     } else {
       errEl.textContent = 'Incorrect username or password.';
