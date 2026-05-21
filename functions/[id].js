@@ -117,16 +117,16 @@ function shareHTML(tok, displayName, size, exp) {
   const expStr = fmtExp(exp);
   const isNever = !exp;
   const dlUrl = `/api/dl?tok=${encodeURIComponent(tok)}&download=1`;
-  const previewUrl = `/api/dl?tok=${encodeURIComponent(tok)}`;
+
   const safe  = displayName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const wide  = IMGS.has(ext) || VIDS.has(ext) || TEXTS.has(ext);
   let preview = '';
   if (IMGS.has(ext)) {
-    preview = `<div class="pv-wrap img-wrap"><img src="${previewUrl}" alt="${safe}" loading="lazy" onerror="this.closest('.pv-wrap').style.display='none'"></div>`;
+    preview = `<div class="pv-wrap img-wrap"><img src="${dlUrl}" alt="${safe}" loading="lazy" onerror="this.closest('.pv-wrap').style.display='none'"></div>`;
   } else if (VIDS.has(ext)) {
-    preview = `<div class="pv-wrap vid-wrap"><video controls preload="metadata" src="${previewUrl}" onerror="this.closest('.pv-wrap').style.display='none'"></video></div>`;
+    preview = `<div class="pv-wrap vid-wrap"><video controls preload="metadata" src="${dlUrl}" onerror="this.closest('.pv-wrap').style.display='none'"></video></div>`;
   } else if (TEXTS.has(ext)) {
-    preview = `<div class="pv-wrap code-wrap"><div class="code-loading" id="cl"><span class="spin"></span>Loading preview\u2026</div><pre id="cp" class="code-pre" style="display:none"></pre><div id="ce" class="code-err" style="display:none">Preview unavailable.</div></div><script>(function(){fetch(${JSON.stringify(previewUrl)}).then(function(r){if(!r.ok)throw 0;return r.text();}).then(function(t){document.getElementById('cp').textContent=t.length>10000?t.slice(0,10000)+'\n\n\u2026 (truncated)':t;document.getElementById('cl').style.display='none';document.getElementById('cp').style.display='';}).catch(function(){document.getElementById('cl').style.display='none';document.getElementById('ce').style.display='';});})();<\/script>`;
+    preview = `<div class="pv-wrap code-wrap"><div class="code-loading" id="cl"><span class="spin"></span>Loading preview\u2026</div><pre id="cp" class="code-pre" style="display:none"></pre><div id="ce" class="code-err" style="display:none">Preview unavailable.</div></div><script>(function(){fetch(${JSON.stringify(dlUrl)}).then(function(r){if(!r.ok)throw 0;return r.text();}).then(function(t){document.getElementById('cp').textContent=t.length>10000?t.slice(0,10000)+'\n\n\u2026 (truncated)':t;document.getElementById('cl').style.display='none';document.getElementById('cp').style.display='';}).catch(function(){document.getElementById('cl').style.display='none';document.getElementById('ce').style.display='';});})();<\/script>`;
   }
   const metaParts = [sz ? `<span>${sz}</span>` : ''];
   if (isNever) {
