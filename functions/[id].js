@@ -55,20 +55,20 @@ function fmtExp(exp) {
 }
 function extOf(name) { return (name.includes('.') ? name.split('.').pop() : '').toLowerCase(); }
 function badgeColor(ext) {
-  const MAP = {jpg:'#7c3aed',jpeg:'#7c3aed',png:'#7c3aed',gif:'#7c3aed',webp:'#7c3aed',bmp:'#7c3aed',avif:'#7c3aed',tiff:'#7c3aed',tif:'#7c3aed',ico:'#7c3aed',svg:'#7c3aed',mp4:'#dc2626',webm:'#dc2626',mov:'#dc2626',m4v:'#dc2626',mp3:'#d97706',wav:'#d97706',ogg:'#d97706',m4a:'#d97706',flac:'#d97706',aac:'#d97706',js:'#16a34a',ts:'#16a34a',jsx:'#16a34a',tsx:'#16a34a',py:'#16a34a',rb:'#16a34a',go:'#16a34a',rs:'#16a34a',java:'#16a34a',c:'#16a34a',cpp:'#16a34a',h:'#16a34a',swift:'#16a34a',kt:'#16a34a',php:'#16a34a',sh:'#16a34a',bash:'#16a34a',json:'#0891b2',csv:'#0891b2',xml:'#0891b2',yaml:'#0891b2',yml:'#0891b2',sql:'#0891b2',pdf:'#2563eb',doc:'#2563eb',docx:'#2563eb',txt:'#2563eb',md:'#2563eb',zip:'#b45309',gz:'#b45309',rar:'#b45309'};
+  const MAP = {jpg:'#2563eb',jpeg:'#2563eb',png:'#2563eb',gif:'#2563eb',webp:'#2563eb',bmp:'#2563eb',avif:'#2563eb',tiff:'#2563eb',tif:'#2563eb',ico:'#2563eb',svg:'#2563eb',mp4:'#dc2626',webm:'#dc2626',mov:'#dc2626',m4v:'#dc2626',mp3:'#d97706',wav:'#d97706',ogg:'#d97706',m4a:'#d97706',flac:'#d97706',aac:'#d97706',js:'#16a34a',ts:'#16a34a',jsx:'#16a34a',tsx:'#16a34a',py:'#16a34a',rb:'#16a34a',go:'#16a34a',rs:'#16a34a',java:'#16a34a',c:'#16a34a',cpp:'#16a34a',h:'#16a34a',swift:'#16a34a',kt:'#16a34a',php:'#16a34a',sh:'#16a34a',bash:'#16a34a',json:'#0891b2',csv:'#0891b2',xml:'#0891b2',yaml:'#0891b2',yml:'#0891b2',sql:'#0891b2',pdf:'#2563eb',doc:'#2563eb',docx:'#2563eb',txt:'#2563eb',md:'#2563eb',zip:'#b45309',gz:'#b45309',rar:'#b45309'};
   return MAP[ext] || '#6b7280';
 }
 const IMGS  = new Set(['jpg','jpeg','png','gif','webp','bmp','avif','tiff','tif','ico']);
 const VIDS  = new Set(['mp4','webm','mov','m4v']);
 const TEXTS = new Set(['txt','md','markdown','csv','json','log','ini','cfg','conf','yaml','yml','toml','diff','patch','nfo','js','ts','jsx','tsx','py','rb','sh','bash','c','cpp','h','java','go','rs','swift','kt','php','css','html','htm','xml','sql','r','lua']);
 const CSS = `
-:root{--bg:#f0f2f5;--card:#fff;--border:#e5e7eb;--t1:#111827;--t2:#6b7280;--t3:#9ca3af;--dl-bg:#111827;--dl-fg:#fff;--code-bg:#f8fafc;--code-text:#1e293b;--spin-b:#d1d5db;--spin-t:#6b7280;color-scheme:light}
-@media(prefers-color-scheme:dark){:root{--bg:#0c0e14;--card:#161b27;--border:#232a3a;--t1:#f1f5f9;--t2:#94a3b8;--t3:#475569;--dl-bg:#f1f5f9;--dl-fg:#0c0e14;--code-bg:#0d1117;--code-text:#c9d1d9;--spin-b:#2d3748;--spin-t:#94a3b8;color-scheme:dark}}
+:root{--bg:#eff6ff;--card:#fff;--border:#dbeafe;--t1:#111827;--t2:#6b7280;--t3:#9ca3af;--dl-bg:#2563eb;--dl-fg:#fff;--code-bg:#f8faff;--code-text:#1e293b;color-scheme:light}
+@media(prefers-color-scheme:dark){:root{--bg:#0d0f1a;--card:#131929;--border:#1e2e50;--t1:#f1f5f9;--t2:#94a3b8;--t3:#475569;--dl-bg:#3b82f6;--dl-fg:#fff;--code-bg:#0d1117;--code-text:#c9d1d9;color-scheme:dark}}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;display:flex;flex-direction:column}
 .topbar{height:54px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.75rem;flex-shrink:0}
 .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:.95rem;color:var(--t1);text-decoration:none}
-.brand-dot{width:8px;height:8px;border-radius:50%;background:#7c3aed}
+.brand-logo{width:20px;height:20px;border-radius:5px;background:#2563eb;display:flex;align-items:center;justify-content:center;flex-shrink:0}.brand-logo svg{display:block}
 main{flex:1;display:flex;justify-content:center;padding:2.5rem 1.25rem 4rem}
 .wrap{width:100%;display:flex;flex-direction:column;gap:1rem}
 .pv-wrap{width:100%;border-radius:14px;overflow:hidden;border:1px solid var(--border);background:var(--card)}
@@ -79,28 +79,28 @@ main{flex:1;display:flex;justify-content:center;padding:2.5rem 1.25rem 4rem}
 .code-loading{padding:1.75rem 1.5rem;display:flex;align-items:center;gap:.6rem;color:var(--t2);font-size:.85rem}
 .code-pre{font-family:'SF Mono','Fira Mono','Cascadia Code',Consolas,monospace;font-size:.775rem;line-height:1.7;padding:1.25rem 1.5rem;overflow:auto;max-height:440px;white-space:pre;color:var(--code-text)}
 .code-err{padding:1.5rem;color:var(--t3);font-size:.85rem}
-.spin{width:15px;height:15px;border:2px solid var(--spin-b);border-top-color:var(--spin-t);border-radius:50%;animation:sp .7s linear infinite;flex-shrink:0}
+.spin{width:15px;height:15px;border:2px solid var(--border);border-top-color:#2563eb;border-radius:50%;animation:sp .7s linear infinite;flex-shrink:0}
 @keyframes sp{to{transform:rotate(360deg)}}
 .info-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.5rem 1.75rem}
 .file-row{display:flex;align-items:center;gap:1rem;margin-bottom:1.35rem}
 .badge{width:50px;height:50px;min-width:50px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:.58rem;font-weight:800;letter-spacing:.06em;color:#fff}
 .file-name{font-size:1.05rem;font-weight:600;color:var(--t1);word-break:break-all;line-height:1.4;margin-bottom:.3rem}
 .file-meta{font-size:.8rem;color:var(--t2);display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
-.never-badge{display:inline-flex;align-items:center;gap:.3rem;font-size:.7rem;font-weight:600;background:#16a34a22;color:#16a34a;border:1px solid #16a34a44;border-radius:4px;padding:.15rem .4rem}
-@media(prefers-color-scheme:dark){.never-badge{background:#16a34a18;color:#4ade80;border-color:#16a34a33}}
+.never-badge{display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;font-weight:600;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:4px;padding:.15rem .5rem}
+@media(prefers-color-scheme:dark){.never-badge{background:#1a2845;color:#60a5fa;border-color:#2a3a60}}
 .dl-btn{display:flex;align-items:center;justify-content:center;gap:.5rem;width:100%;padding:.95rem 1.25rem;background:var(--dl-bg);color:var(--dl-fg);border:none;border-radius:10px;font-family:inherit;font-size:.95rem;font-weight:600;text-decoration:none;cursor:pointer;transition:opacity .15s}
 .dl-btn:hover{opacity:.82}
 .dl-btn:active{opacity:.65}
 footer{text-align:center;font-size:.72rem;color:var(--t3);padding:.5rem 1.25rem 2rem}
 @media(max-width:480px){main{padding:1.25rem .75rem 3rem}.info-card{padding:1.25rem}.topbar{padding:0 1.25rem}}`;
 const ERR_CSS = `
-:root{--bg:#f0f2f5;--card:#fff;--border:#e5e7eb;--t1:#111827;--t2:#6b7280;--t3:#9ca3af;--icon-bg:#f3f4f6;color-scheme:light}
-@media(prefers-color-scheme:dark){:root{--bg:#0c0e14;--card:#161b27;--border:#232a3a;--t1:#f1f5f9;--t2:#94a3b8;--t3:#475569;--icon-bg:#1e2535;color-scheme:dark}}
+:root{--bg:#eff6ff;--card:#fff;--border:#dbeafe;--t1:#111827;--t2:#6b7280;--t3:#9ca3af;--icon-bg:#eff6ff;color-scheme:light}
+@media(prefers-color-scheme:dark){:root{--bg:#0d0f1a;--card:#131929;--border:#1e2e50;--t1:#f1f5f9;--t2:#94a3b8;--t3:#475569;--icon-bg:#1a2845;color-scheme:dark}}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;display:flex;flex-direction:column}
 .topbar{height:54px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.75rem}
 .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:.95rem;color:var(--t1);text-decoration:none}
-.brand-dot{width:8px;height:8px;border-radius:50%;background:#7c3aed}
+.brand-logo{width:20px;height:20px;border-radius:5px;background:#2563eb;display:flex;align-items:center;justify-content:center;flex-shrink:0}.brand-logo svg{display:block}
 main{flex:1;display:flex;align-items:center;justify-content:center;padding:2rem 1.25rem}
 .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:2.75rem 2.25rem;width:100%;max-width:420px;text-align:center}
 .err-icon{width:68px;height:68px;border-radius:18px;background:var(--icon-bg);display:flex;align-items:center;justify-content:center;margin:0 auto 1.5rem;border:1px solid var(--border)}
@@ -117,15 +117,16 @@ function shareHTML(tok, displayName, size, exp) {
   const expStr = fmtExp(exp);
   const isNever = !exp;
   const dlUrl = `/api/dl?tok=${encodeURIComponent(tok)}&download=1`;
+  const previewUrl = `/api/dl?tok=${encodeURIComponent(tok)}`;
   const safe  = displayName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const wide  = IMGS.has(ext) || VIDS.has(ext) || TEXTS.has(ext);
   let preview = '';
   if (IMGS.has(ext)) {
-    preview = `<div class="pv-wrap img-wrap"><img src="${dlUrl}" alt="${safe}" loading="lazy" onerror="this.closest('.pv-wrap').style.display='none'"></div>`;
+    preview = `<div class="pv-wrap img-wrap"><img src="${previewUrl}" alt="${safe}" loading="lazy" onerror="this.closest('.pv-wrap').style.display='none'"></div>`;
   } else if (VIDS.has(ext)) {
-    preview = `<div class="pv-wrap vid-wrap"><video controls preload="metadata" src="${dlUrl}" onerror="this.closest('.pv-wrap').style.display='none'"></video></div>`;
+    preview = `<div class="pv-wrap vid-wrap"><video controls preload="metadata" src="${previewUrl}" onerror="this.closest('.pv-wrap').style.display='none'"></video></div>`;
   } else if (TEXTS.has(ext)) {
-    preview = `<div class="pv-wrap code-wrap"><div class="code-loading" id="cl"><span class="spin"></span>Loading preview\u2026</div><pre id="cp" class="code-pre" style="display:none"></pre><div id="ce" class="code-err" style="display:none">Preview unavailable.</div></div><script>(function(){fetch(${JSON.stringify(dlUrl)}).then(function(r){if(!r.ok)throw 0;return r.text();}).then(function(t){document.getElementById('cp').textContent=t.length>10000?t.slice(0,10000)+'\n\n\u2026 (truncated)':t;document.getElementById('cl').style.display='none';document.getElementById('cp').style.display='';}).catch(function(){document.getElementById('cl').style.display='none';document.getElementById('ce').style.display='';});})();<\/script>`;
+    preview = `<div class="pv-wrap code-wrap"><div class="code-loading" id="cl"><span class="spin"></span>Loading preview\u2026</div><pre id="cp" class="code-pre" style="display:none"></pre><div id="ce" class="code-err" style="display:none">Preview unavailable.</div></div><script>(function(){fetch(${JSON.stringify(previewUrl)}).then(function(r){if(!r.ok)throw 0;return r.text();}).then(function(t){document.getElementById('cp').textContent=t.length>10000?t.slice(0,10000)+'\n\n\u2026 (truncated)':t;document.getElementById('cl').style.display='none';document.getElementById('cp').style.display='';}).catch(function(){document.getElementById('cl').style.display='none';document.getElementById('ce').style.display='';});})();<\/script>`;
   }
   const metaParts = [sz ? `<span>${sz}</span>` : ''];
   if (isNever) {
@@ -133,7 +134,7 @@ function shareHTML(tok, displayName, size, exp) {
   } else {
     metaParts.push(`<span>${expStr}</span>`);
   }
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safe} \u2014 StoreGit</title><style>${CSS}</style></head><body><header class="topbar"><a href="/" class="brand"><span class="brand-dot"></span>StoreGit</a></header><main><div class="wrap" style="max-width:${wide ? '700' : '420'}px">${preview}<div class="info-card"><div class="file-row"><div class="badge" style="background:${color}">${label}</div><div style="min-width:0;flex:1"><div class="file-name">${safe}</div><div class="file-meta">${metaParts.filter(Boolean).join('')}</div></div></div><a class="dl-btn" href="${dlUrl}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="17" height="17"><path d="M12 5v14M5 12l7 7 7-7"/></svg>Download</a></div></div></main><footer>Shared via StoreGit</footer></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safe} \u2014 StoreGit</title><style>${CSS}</style></head><body><header class="topbar"><a href="/" class="brand"><span class="brand-logo"><svg viewBox="0 0 20 20" width="12" height="12"><path d="M4 10h12M10 4v12" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></svg></span>StoreGit</a></header><main><div class="wrap" style="max-width:${wide ? '700' : '420'}px">${preview}<div class="info-card"><div class="file-row"><div class="badge" style="background:${color}">${label}</div><div style="min-width:0;flex:1"><div class="file-name">${safe}</div><div class="file-meta">${metaParts.filter(Boolean).join('')}</div></div></div><a class="dl-btn" href="${dlUrl}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="17" height="17"><path d="M12 5v14M5 12l7 7 7-7"/></svg>Download</a></div></div></main><footer>Shared via StoreGit</footer></body></html>`;
 }
 function errorHTML(reason) {
   const cfg = {
@@ -141,5 +142,5 @@ function errorHTML(reason) {
     notfound:    { title: 'Link Not Found',     h1: 'Link not found',            p: 'This share link does not exist or may have been mistyped.' },
     unavailable: { title: 'Unavailable',        h1: 'Service unavailable',       p: 'Short links are not configured on this server. Ask the sender for the full link.' },
   }[reason] || { title: 'Error', h1: 'Something went wrong', p: 'An unexpected error occurred.' };
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${cfg.title} \u2014 StoreGit</title><style>${ERR_CSS}</style></head><body><header class="topbar"><a href="/" class="brand"><span class="brand-dot"></span>StoreGit</a></header><main><div class="card"><div class="err-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="30" height="30"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div><h1>${cfg.h1}</h1><p>${cfg.p}</p><a href="/" class="home-btn">Go to StoreGit</a></div></main><footer>StoreGit</footer></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${cfg.title} \u2014 StoreGit</title><style>${ERR_CSS}</style></head><body><header class="topbar"><a href="/" class="brand"><span class="brand-logo"><svg viewBox="0 0 20 20" width="12" height="12"><path d="M4 10h12M10 4v12" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></svg></span>StoreGit</a></header><main><div class="card"><div class="err-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="30" height="30"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div><h1>${cfg.h1}</h1><p>${cfg.p}</p><a href="/" class="home-btn">Go to StoreGit</a></div></main><footer>StoreGit</footer></body></html>`;
 }
