@@ -3,8 +3,8 @@ const SESSION_TTL               = 8  * 60 * 60 * 1000;
 const SESSION_REFRESH_THRESHOLD =      60 * 60 * 1000;
 const SHARE_TTL_MAX             = 7 * 24 * 60 * 60;
 const RATE_WINDOW_MS            = 15 * 60 * 1000;
-const RATE_MAX_LOGIN            = 5;
-const RATE_MAX_LOGIN_USER       = 10;
+const LOGIN_LOCKOUT_MS          = 30 * 1000;
+const LOGIN_LOCKOUT_ATTEMPTS    = 3;
 const RATE_MAX_SIGNUP           = 3;
 const RATE_MAX_RESET            = 3;
 const CHUNK_B64_MAX             = 14 * 1024 * 1024;
@@ -172,8 +172,8 @@ function contentDisposition(safeName) {
 function buildSharePage(filename, displayName, size, expIso, tok) {
   const extRaw = (displayName.split('.').pop() || '').toLowerCase();
   const extLabel = extRaw.slice(0,5).toUpperCase() || 'FILE';
-  const sz   = size > 0 ? (size < 1048576 ? (size/1024).toFixed(1)+' KB' : size < 1073741824 ? (size/1048576).toFixed(1)+' MB' : (size/1073741824).toFixed(2)+' GB') : '';
-  const exp  = expIso ? new Date(expIso).toLocaleString('en-US', { dateStyle:'medium', timeStyle:'short' }) : '';
+  const sz = size > 0 ? (size < 1048576 ? (size/1024).toFixed(1)+' KB' : size < 1073741824 ? (size/1048576).toFixed(1)+' MB' : (size/1073741824).toFixed(2)+' GB') : '';
+  const exp = expIso === null ? 'Never expires' : expIso ? 'Expires ' + new Date(expIso).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}) : '';
   const dlUrl = `?tok=${encodeURIComponent(tok)}&download=1`;
   const IMGS  = new Set(['jpg','jpeg','png','gif','webp','bmp','avif','tiff','tif','ico']);
   const VIDS  = new Set(['mp4','webm','mov','m4v']);
@@ -181,73 +181,22 @@ function buildSharePage(filename, displayName, size, expIso, tok) {
   const isImg  = IMGS.has(extRaw);
   const isVid  = VIDS.has(extRaw);
   const isText = TEXTS.has(extRaw);
-  const CODE_EXTS = new Set(['js','ts','jsx','tsx','py','rb','sh','bash','c','cpp','h','java','go','rs','swift','kt','php','css','html','htm','xml','sql','r','lua','json']);
-  const isCode = CODE_EXTS.has(extRaw);
-
-  // Preview block: image / video / code / text
-  const previewBlock = isImg
-    ? `<div class="preview-wrap"><img class="preview-img" src="${dlUrl}" alt="${displayName.replace(/"/g,'&quot;')}" loading="lazy" onerror="this.closest('.preview-wrap').style.display='none'"></div>`
-    : isVid
-    ? `<div class="preview-wrap"><video class="preview-vid" controls preload="metadata" src="${dlUrl}" onerror="this.closest('.preview-wrap').style.display='none'"></video></div>`
-    : isText
-    ? `<div class="preview-wrap text-wrap" id="tw"><div class="text-loading" id="tl"><span class="spin"></span> Loading preview…</div><pre class="code-pre" id="cp" style="display:none"></pre><div class="text-err" id="te" style="display:none">Could not load preview.</div></div><script>
-(function(){
-  var pre=document.getElementById('cp'),ld=document.getElementById('tl'),er=document.getElementById('te');
-  fetch(${JSON.stringify(dlUrl)}).then(function(r){if(!r.ok)throw 0;return r.text();}).then(function(t){
-    ld.style.display='none';
-    pre.textContent=t.length>8000?t.slice(0,8000)+'\\n\\n… (truncated)':t;
-    pre.style.display='';
-  }).catch(function(){ld.style.display='none';er.style.display='';});
-})();
-</script>`
-    : '';
-
-  const nameSafe = displayName.replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const previewCss = (isImg || isVid) ? `
-.preview-wrap{width:100%;margin-bottom:1.25rem;border-radius:10px;overflow:hidden;background:#000;display:flex;align-items:center;justify-content:center;}
-.preview-img{max-width:100%;max-height:420px;object-fit:contain;display:block;margin:0 auto;}
-.preview-vid{width:100%;max-height:380px;display:block;}` : isText ? `
-.preview-wrap.text-wrap{background:#f7f7f9;border:1px solid #e8e8ec;border-radius:10px;overflow:hidden;margin-bottom:1.25rem;text-align:left;}
-.text-loading{padding:1rem;font-size:.8rem;color:#888;display:flex;align-items:center;gap:.5rem;}
-.spin{width:14px;height:14px;border:2px solid #ccc;border-top-color:#555;border-radius:50%;display:inline-block;animation:sp .7s linear infinite;flex-shrink:0;}
-@keyframes sp{to{transform:rotate(360deg)}}
-.text-err{padding:1rem;font-size:.8rem;color:#c0392b;}
-.code-pre{font-family:'SF Mono','Fira Mono','Consolas',monospace;font-size:.72rem;line-height:1.55;padding:1rem;overflow:auto;max-height:360px;white-space:pre;color:#1a1a1a;margin:0;}
-@media(prefers-color-scheme:dark){.preview-wrap.text-wrap{background:#1a1a1f;border-color:#2c2c34;}.code-pre{color:#e2e2e8;}.spin{border-color:#444;border-top-color:#aaa;}}` : '';
-
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${nameSafe} — StoreGit</title><style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#f4f4f6;color:#111;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:${isImg||isVid||isText?'flex-start':'center'};padding:1.5rem;}
-.card{background:#fff;border-radius:16px;padding:2rem 1.75rem;width:100%;max-width:${isImg||isVid||isText?'640':'360'}px;box-shadow:0 1px 4px rgba(0,0,0,.06),0 8px 28px rgba(0,0,0,.08);${isImg||isVid||isText?'margin:1.5rem auto;':'text-align:center;'}}
-.brand{font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#999;margin-bottom:1.5rem;}
-.file-header{display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem;}
-.file-icon{width:42px;height:42px;min-width:42px;background:#f0f0f2;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:700;letter-spacing:.04em;color:#555;}
-.file-info{text-align:left;overflow:hidden;}
-.file-name{font-size:.95rem;font-weight:600;color:#111;word-break:break-all;line-height:1.35;}
-.file-meta{font-size:.75rem;color:#999;margin-top:.15rem;}
-.dl-btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;width:100%;padding:.82rem 1.2rem;background:#1a1a1a;color:#fff;border:none;border-radius:10px;font-family:inherit;font-size:.9rem;font-weight:600;text-decoration:none;transition:opacity .15s;cursor:pointer;}
-.dl-btn:active{opacity:.75}
-.footer{margin-top:1.25rem;font-size:.72rem;color:#ccc;text-align:center;}
-${previewCss}
-@media(prefers-color-scheme:dark){body{background:#0d0d0f}.card{background:#1c1c1f;box-shadow:0 1px 4px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.5)}.brand{color:#555}.file-icon{background:#28282c;color:#aaa}.file-name{color:#f0f0f0}.file-meta{color:#666}.dl-btn{background:#f0f0f0;color:#111}.footer{color:#444}}
-</style></head><body>
-<div class="card">
-  <div class="brand">StoreGit</div>
-  ${previewBlock}
-  <div class="file-header">
-    <div class="file-icon">${extLabel}</div>
-    <div class="file-info">
-      <div class="file-name">${nameSafe}</div>
-      <div class="file-meta">${[sz, exp ? 'Expires '+exp : ''].filter(Boolean).join(' · ')}</div>
-    </div>
-  </div>
-  <a class="dl-btn" href="${dlUrl}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M12 5v14M5 12l7 7 7-7"/></svg>Download</a>
-</div>
-<div class="footer">Shared via StoreGit</div>
-</body></html>`;
+  const BADGE_COLORS = {jpg:'#7c3aed',jpeg:'#7c3aed',png:'#7c3aed',gif:'#7c3aed',webp:'#7c3aed',bmp:'#7c3aed',avif:'#7c3aed',tiff:'#7c3aed',tif:'#7c3aed',ico:'#7c3aed',svg:'#7c3aed',mp4:'#dc2626',webm:'#dc2626',mov:'#dc2626',m4v:'#dc2626',mp3:'#d97706',wav:'#d97706',ogg:'#d97706',m4a:'#d97706',flac:'#d97706',aac:'#d97706',js:'#16a34a',ts:'#16a34a',jsx:'#16a34a',tsx:'#16a34a',py:'#16a34a',rb:'#16a34a',go:'#16a34a',rs:'#16a34a',java:'#16a34a',c:'#16a34a',cpp:'#16a34a',h:'#16a34a',swift:'#16a34a',kt:'#16a34a',php:'#16a34a',sh:'#16a34a',bash:'#16a34a',json:'#0891b2',csv:'#0891b2',xml:'#0891b2',yaml:'#0891b2',yml:'#0891b2',sql:'#0891b2',pdf:'#2563eb',doc:'#2563eb',docx:'#2563eb',txt:'#2563eb',md:'#2563eb',zip:'#b45309',gz:'#b45309',rar:'#b45309'};
+  const badgeColor = BADGE_COLORS[extRaw] || '#6b7280';
+  const nameSafe = displayName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const meta = [sz, exp].filter(Boolean).join('  ·  ');
+  let preview = '';
+  if (isImg) {
+    preview = `<div class="pv-wrap img-wrap"><img src="${dlUrl}" alt="${nameSafe}" loading="lazy" onerror="this.closest('.pv-wrap').style.display='none'"></div>`;
+  } else if (isVid) {
+    preview = `<div class="pv-wrap vid-wrap"><video controls preload="metadata" src="${dlUrl}" onerror="this.closest('.pv-wrap').style.display='none'"></video></div>`;
+  } else if (isText) {
+    preview = `<div class="pv-wrap code-wrap"><div class="code-loading" id="cl"><span class="spin"></span>Loading preview\u2026</div><pre id="cp" class="code-pre" style="display:none"></pre><div id="ce" class="code-err" style="display:none">Preview unavailable.</div></div><script>(function(){fetch(${JSON.stringify(dlUrl)}).then(function(r){if(!r.ok)throw 0;return r.text();}).then(function(t){document.getElementById('cp').textContent=t.length>10000?t.slice(0,10000)+'\n\n\u2026 (truncated)':t;document.getElementById('cl').style.display='none';document.getElementById('cp').style.display='';}).catch(function(){document.getElementById('cl').style.display='none';document.getElementById('ce').style.display='';});})();<\/script>`;
+  }
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${nameSafe} \u2014 StoreGit</title><style>:root{--bg:#f0f2f5;--card:#fff;--border:#e5e7eb;--t1:#111827;--t2:#6b7280;--t3:#9ca3af;--dl-bg:#111827;--dl-fg:#fff;--code-bg:#f8fafc;--code-text:#1e293b;color-scheme:light}@media(prefers-color-scheme:dark){:root{--bg:#0c0e14;--card:#161b27;--border:#232a3a;--t1:#f1f5f9;--t2:#94a3b8;--t3:#475569;--dl-bg:#f1f5f9;--dl-fg:#0c0e14;--code-bg:#0d1117;--code-text:#c9d1d9;color-scheme:dark}}*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;display:flex;flex-direction:column}.topbar{height:54px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1.75rem}.brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:.95rem;color:var(--t1);text-decoration:none}.brand-dot{width:8px;height:8px;border-radius:50%;background:#7c3aed}main{flex:1;display:flex;justify-content:center;padding:2.5rem 1.25rem 4rem}.wrap{width:100%;max-width:${isImg||isVid||isText?'700':'420'}px;display:flex;flex-direction:column;gap:1rem}.pv-wrap{width:100%;border-radius:14px;overflow:hidden;border:1px solid var(--border);background:var(--card)}.img-wrap{background:#000;display:flex;align-items:center;justify-content:center;min-height:180px}.img-wrap img{max-width:100%;max-height:540px;object-fit:contain;display:block}.vid-wrap video{width:100%;max-height:460px;display:block;background:#000}.code-wrap{background:var(--code-bg)}.code-loading{padding:1.75rem 1.5rem;display:flex;align-items:center;gap:.6rem;color:var(--t2);font-size:.85rem}.code-pre{font-family:'SF Mono','Fira Mono',Consolas,monospace;font-size:.775rem;line-height:1.7;padding:1.25rem 1.5rem;overflow:auto;max-height:440px;white-space:pre;color:var(--code-text)}.code-err{padding:1.5rem;color:var(--t3);font-size:.85rem}.spin{width:15px;height:15px;border:2px solid var(--border);border-top-color:var(--t2);border-radius:50%;animation:sp .7s linear infinite;flex-shrink:0}@keyframes sp{to{transform:rotate(360deg)}}.info-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.5rem 1.75rem}.file-row{display:flex;align-items:center;gap:1rem;margin-bottom:1.35rem}.badge{width:50px;height:50px;min-width:50px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:.58rem;font-weight:800;letter-spacing:.06em;color:#fff}.file-name{font-size:1.05rem;font-weight:600;color:var(--t1);word-break:break-all;line-height:1.4;margin-bottom:.3rem}.file-meta{font-size:.8rem;color:var(--t2)}.dl-btn{display:flex;align-items:center;justify-content:center;gap:.5rem;width:100%;padding:.95rem 1.25rem;background:var(--dl-bg);color:var(--dl-fg);border:none;border-radius:10px;font-family:inherit;font-size:.95rem;font-weight:600;text-decoration:none;cursor:pointer;transition:opacity .15s}.dl-btn:hover{opacity:.82}.dl-btn:active{opacity:.65}footer{text-align:center;font-size:.72rem;color:var(--t3);padding:.5rem 1.25rem 2rem}@media(max-width:480px){main{padding:1.25rem .75rem 3rem}.info-card{padding:1.25rem}.topbar{padding:0 1.25rem}}</style></head><body><header class="topbar"><a href="/" class="brand"><span class="brand-dot"></span>StoreGit</a></header><main><div class="wrap">${preview}<div class="info-card"><div class="file-row"><div class="badge" style="background:${badgeColor}">${extLabel}</div><div><div class="file-name">${nameSafe}</div><div class="file-meta">${meta}</div></div></div><a class="dl-btn" href="${dlUrl}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="17" height="17"><path d="M12 5v14M5 12l7 7 7-7"/></svg>Download</a></div></div></main><footer>Shared via StoreGit</footer></body></html>`;
 }
 async function createShareToken(username, filename, repoIdx, ttlSeconds, size, displayName, secret) {
-  const exp     = Date.now() + ttlSeconds * 1000;
+  const exp     = ttlSeconds === 0 ? 0 : Date.now() + ttlSeconds * 1000;
   const payload = b64urlEnc(ENC.encode(JSON.stringify({ u: username, f: filename, r: repoIdx, e: exp, s: size || 0, d: displayName || filename })));
   const sig     = await hmacSign(`share:${payload}`, secret);
   return `${payload}.${sig}`;
@@ -269,7 +218,7 @@ async function verifyShareToken(token, secret) {
       size:        raw.s ?? raw.size ?? 0,
       displayName: raw.d ?? raw.displayName,
     };
-    if (Date.now() > data.exp) return null;
+    if (data.exp !== 0 && Date.now() > data.exp) return null;
     return data;
   } catch { return null; }
 }
@@ -347,15 +296,15 @@ function getIP(req) {
   return req.headers.get('CF-Connecting-IP') ||
     req.headers.get('X-Forwarded-For')?.split(',')[0].trim() || 'unknown';
 }
-async function checkRate(key, max, env) {
+async function checkRate(key, max, env, windowMs = RATE_WINDOW_MS) {
   const now = Date.now();
   const kv  = env.RATE_LIMIT_KV || null;
   let r = kv
     ? await kv.get(key, 'json').catch(() => null)
     : _memRate.get(key) || null;
   if (!r || now > r.resetAt) {
-    const f = { count: 1, resetAt: now + RATE_WINDOW_MS };
-    if (kv) await kv.put(key, JSON.stringify(f), { expirationTtl: Math.ceil(RATE_WINDOW_MS / 1000) }).catch(() => {});
+    const f = { count: 1, resetAt: now + windowMs };
+    if (kv) await kv.put(key, JSON.stringify(f), { expirationTtl: Math.ceil(windowMs / 1000) }).catch(() => {});
     else { _memRate.set(key, f); if (_memRate.size > 20000) for (const [k, v] of _memRate) if (now > v.resetAt) _memRate.delete(k); }
     return false;
   }
@@ -643,11 +592,11 @@ async function _handleRequest({ request, env, params }) {
   }
   if (route === 'auth' && method === 'POST') {
     const ip = getIP(request);
-    if (await checkRate(`login:${ip}`, RATE_MAX_LOGIN, env)) return fail(request, 429);
+    if (await checkRate(`login:${ip}`, LOGIN_LOCKOUT_ATTEMPTS, env, LOGIN_LOCKOUT_MS)) return fail(request, 429);
     let body; try { body = await request.json(); } catch { return fail(request, 400); }
     const { username, password } = body||{};
     if (!username||!password) return fail(request, 400);
-    if (await checkRate(`login:user:${username.toLowerCase()}`, RATE_MAX_LOGIN_USER, env)) return fail(request, 429);
+    if (await checkRate(`login:user:${username.toLowerCase()}`, LOGIN_LOCKOUT_ATTEMPTS, env, LOGIN_LOCKOUT_MS)) return fail(request, 429);
     const rec = await getUser(username, env);
     if (!rec) {
       await pbkdf2Hash(password, crypto.getRandomValues(new Uint8Array(16)));
@@ -686,25 +635,6 @@ async function _handleRequest({ request, env, params }) {
       }
     }
     return jsonRes(request, { ok:true }, 200, { 'Set-Cookie': buildSetCookie(request, '', 0) });
-  }
-  // Short-link resolver: /api/s/{id}
-  if (route.startsWith('s/') && method === 'GET') {
-    const shortId = route.slice(2);
-    if (!shortId || !/^[0-9a-zA-Z]{8}$/.test(shortId)) return fail(request, 404);
-    const kv2 = env.RATE_LIMIT_KV || null;
-    const tok = kv2 ? await kv2.get('sl:' + shortId).catch(() => null) : null;
-    if (!tok) {
-      const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Link Expired</title><style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f4f4f6}.card{background:#fff;border-radius:14px;padding:2rem;text-align:center;max-width:320px;box-shadow:0 4px 24px rgba(0,0,0,.08)}h2{margin-bottom:.5rem}p{font-size:.85rem;color:#888}</style></head><body><div class="card"><h2>Link expired</h2><p>This share link has expired or is invalid.</p></div></body></html>';
-      return new Response(html, { status:410, headers:{'Content-Type':'text/html;charset=utf-8','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Cache-Control':'no-store'} });
-    }
-    // Serve directly without redirecting so the long token never appears in the browser URL
-    const isDownload = new URL(request.url).searchParams.get('download') === '1';
-    const fakeReq = new Request(
-      new URL(request.url).origin + '/api/dl?tok=' + encodeURIComponent(tok) + (isDownload ? '&download=1' : ''),
-      { method: 'GET', headers: request.headers }
-    );
-    const fakeParams = { path: ['dl'] };
-    return _handleRequest({ request: fakeReq, env, params: fakeParams });
   }
   if (route === 'dl' && method === 'GET') {
     const sp       = new URL(request.url).searchParams;
@@ -875,28 +805,37 @@ async function _dispatchRoute(route, method, request, env, fullSess, sess, secre
     return jsonRes(request, { ok:true, repos: repos.map(r => ({ label: r.label, ghOwner: r.ghOwner, ghRepo: r.ghRepo })) });
   }
   if (route === 'share-link' && method === 'GET') {
-    const params = new URL(request.url).searchParams;
-    const nameP  = params.get('name') || '';
-    const ttlP   = parseInt(params.get('ttl') || '3600', 10);
-    const safe   = sanitize(nameP);
+    const sp    = new URL(request.url).searchParams;
+    const nameP = sp.get('name') || '';
+    const ttlP  = parseInt(sp.get('ttl') || '3600', 10);
+    const never = ttlP === 0;
+    const safe  = sanitize(nameP);
     if (!safe) return fail(request, 400);
-    const ttl = Math.max(60, Math.min(ttlP, SHARE_TTL_MAX));
+    const ttl = never ? 0 : Math.max(60, Math.min(ttlP, SHARE_TTL_MAX));
     let size = 0, displayName = unwrapName(safe);
     try {
       const { data: idx } = await readIndex(fullSess);
       if (idx[safe]) { displayName = idx[safe].originalName || unwrapName(safe); size = idx[safe].totalSize || idx[safe].size || 0; }
     } catch {}
-    const exp = new Date(Date.now() + ttl * 1000).toISOString();
+    const exp = never ? null : new Date(Date.now() + ttl * 1000).toISOString();
     const tok = await createShareToken(sess.username, safe, fullSess.activeRepoIdx, ttl, size, displayName, secret);
-    // Use 8-char short link via KV if available, else fall back to full token URL
     const kv2 = env.RATE_LIMIT_KV || null;
     let url = `/api/dl?tok=${encodeURIComponent(tok)}`;
     if (kv2) {
-      const chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-      const shortId = Array.from(crypto.getRandomValues(new Uint8Array(8)))
-        .map(b => chars[b % 62]).join('');
-      await kv2.put('sl:' + shortId, tok, { expirationTtl: ttl }).catch(() => {});
-      url = `/api/s/${shortId}`;
+      const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
+      let shortId = null;
+      outer: for (let len = 3; len <= 5; len++) {
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const id = Array.from(crypto.getRandomValues(new Uint8Array(len))).map(b => CHARS[b % 64]).join('');
+          const existing = await kv2.get('sl:' + id).catch(() => null);
+          if (!existing) { shortId = id; break outer; }
+        }
+      }
+      if (shortId) {
+        const kvOpts = never ? {} : { expirationTtl: ttl };
+        await kv2.put('sl:' + shortId, JSON.stringify({ tok, displayName, size, exp }), kvOpts).catch(() => {});
+        url = `/${shortId}`;
+      }
     }
     return jsonRes(request, { url, exp });
   }
