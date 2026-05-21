@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "include": ["/*"],
+  "exclude": [
+    "/app.css",
+    "/app.js",
+    "/storegit-logo.png",
+    "/index.html"
+  ]
+}

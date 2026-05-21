@@ -729,8 +729,12 @@ async function shareFile(f) {
     const d = await r.json();
     const fullUrl = window.location.origin + d.url;
     input.value = fullUrl;
-    const exp = new Date(d.exp);
-    expEl.textContent = `Expires ${exp.toLocaleString()}`;
+    if (!d.exp) {
+      expEl.textContent = 'Never expires';
+    } else {
+      const exp = new Date(d.exp);
+      expEl.textContent = `Expires ${exp.toLocaleString()}`;
+    }
     body.style.display = '';
     spinner.style.display = 'none';
   } catch {
