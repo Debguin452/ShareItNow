@@ -269,6 +269,8 @@ function renderFiles(files) {
     const badge = elem('div','file-type-badge');
     const displayName = f.originalName || f.name;
     badge.textContent = fileExt(displayName);
+    badge.style.background = fileColor(fileExtRaw(displayName));
+    badge.style.color = '#fff';
     const info = elem('div','file-info');
     const nm   = elem('div','file-name'); nm.textContent=displayName; nm.title=displayName;
     const mt   = elem('div','file-meta'); mt.textContent=fmtSize(f.size);
@@ -363,7 +365,7 @@ function renderQueue() {
   if(upBtn) { upBtn.style.display=_uploadActive&&!_uploadPaused?'none':''; }
   uploadPending.forEach((it,i)=>{
     const item=elem('div','queue-item');
-    const badge=elem('div','queue-file-icon'); badge.textContent=fileExt(it.file.name);
+    const badge=elem('div','queue-file-icon'); badge.textContent=fileExt(it.file.name); badge.style.background=fileColor(fileExtRaw(it.file.name)); badge.style.color='#fff';
     const info=elem('div','queue-info');
     const nm=elem('div','queue-name'); nm.textContent=it.file.name;
     const sz=elem('div','queue-size');
@@ -600,6 +602,11 @@ function fmtSize(b){
   return`${(b/1073741824).toFixed(2)} GB`;
 }
 function fileExt(name){const e=(name||'').split('.').pop();return e&&e!==name?e.slice(0,5).toUpperCase():'FILE';}
+function fileExtRaw(name){const e=(name||'').split('.').pop();return e&&e!==name?e.toLowerCase():'';}
+function fileColor(ext){
+  const MAP={jpg:'#2563eb',jpeg:'#2563eb',png:'#2563eb',gif:'#2563eb',webp:'#2563eb',bmp:'#2563eb',avif:'#2563eb',tiff:'#2563eb',tif:'#2563eb',ico:'#2563eb',svg:'#2563eb',mp4:'#dc2626',webm:'#dc2626',mov:'#dc2626',m4v:'#dc2626',mp3:'#d97706',wav:'#d97706',ogg:'#d97706',m4a:'#d97706',flac:'#d97706',aac:'#d97706',opus:'#d97706',js:'#16a34a',ts:'#16a34a',jsx:'#16a34a',tsx:'#16a34a',py:'#16a34a',rb:'#16a34a',go:'#16a34a',rs:'#16a34a',java:'#16a34a',c:'#16a34a',cpp:'#16a34a',h:'#16a34a',swift:'#16a34a',kt:'#16a34a',php:'#16a34a',sh:'#16a34a',bash:'#16a34a',json:'#0891b2',csv:'#0891b2',xml:'#0891b2',yaml:'#0891b2',yml:'#0891b2',sql:'#0891b2',pdf:'#ef4444',doc:'#2563eb',docx:'#2563eb',txt:'#6b7280',md:'#6b7280',zip:'#b45309',gz:'#b45309',rar:'#b45309',tar:'#b45309'};
+  return MAP[(ext||'').toLowerCase()]||'#6b7280';
+}
 function elem(tag,cls){const el=document.createElement(tag);if(cls)el.className=cls;return el;}
 function emptyState(msg){
   const d=elem('div','empty-state'),ic=elem('div','empty-state-icon');
@@ -619,7 +626,10 @@ const FD_TEXT  = new Set(['txt','md','markdown','csv','json','log','ini','cfg','
 function openFileDetail(f) {
   _shareFile = f;
   const displayName = f.originalName || f.name;
-  document.getElementById('fd-icon').textContent = fileExt(displayName);
+  const iconEl = document.getElementById('fd-icon');
+  iconEl.textContent = fileExt(displayName);
+  iconEl.style.background = fileColor(fileExtRaw(displayName));
+  iconEl.style.color = '#fff';
   document.getElementById('fd-name').textContent = displayName;
   document.getElementById('fd-meta').textContent = fmtSize(f.size);
   document.getElementById('fd-dl-btn').onclick  = () => downloadFile(f.name, f.size, displayName);
